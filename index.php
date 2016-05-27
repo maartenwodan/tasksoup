@@ -9,7 +9,7 @@ ini_set('session.gc_maxlifetime', (3600*24*30)); //<-- SET SESSION TIME HERE
 session_start();
 require 'lib/rb.php';
 require 'lib/StampTE.php';
-R::setup( 'sqlite:database/data.sql', NULL, NULL, TRUE ); //<-- CONFIGURE YOUR DATABASE HERE
+R::setup( 'sqlite:database/testdata.sql', NULL, NULL, TRUE ); //<-- CONFIGURE YOUR DATABASE HERE
 
 function cut( $str, $len ) {
 	if ( strlen( $str ) < ( $len-3 ) ) return $str;

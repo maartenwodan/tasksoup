@@ -1,0 +1,95 @@
+<?php
+return [
+    /*
+     * Database location, probably the same as the tasksoup one.
+     */
+    'database' => 'sqlite:../database/data.sql',
+
+    /*
+     * Tasksoup information, only required to create links in the github tickets straight to your tasksoup ticket. Has a
+     * trailing slash and http(s) in front.
+     */
+    'tasksoupUrl' => 'http://tasksoup.dyflexis.nl/',
+
+    /*
+     * Git setup below, please provide your user token and which repo to sync with. The repo exists of two parts, the
+     * user or company part (location) and the repository.
+     *
+     * Setup here as well if you want to use cache, and where to save the cache.
+     */
+    'gitToken' => '',
+    'gitLocation' => '',
+    'gitRepo' => '',
+    'gitCache' => true,
+    'gitCacheLocation' => '/tmp/github-api-cache',
+
+    /*
+     * The synctype, default is 'tasksoup-sync'. There are four types, all based on whether you want a two way sync and
+     * which system will be deemed the master source. Any conflicts will be solved by just syncing the master first.
+     *
+     * Oneway is the basic master-slave structure, and no changes made on the slave will be synced back to the master.
+     * Twoway it will mean it will sync any changes from master to slave first, and if there are new or changed issues
+     * or tasks on the slave it will sync those back to the master.
+     *
+     * Master is either 'tasksoup' or 'github'
+     * Type is either 'twoway' or 'oneway'.
+     */
+    'syncMaster' => 'tasksoup',
+    'syncType' => 'sync',
+
+    /*
+     * Log level. Depending on how much you want logged, this is the place to change it. Add the different levels
+     * together to get the information you want. If you want only Errors and Warnings, log level would be 3. Only info
+     * would be 4. Defaults to 3.
+     *
+     * 1 = Errors
+     * 2 = Warnings
+     * 4 = Info
+     * 8 = Debug
+     */
+    'log' => 7,
+
+    /*
+     * If you don't want to automatically delete tickets when they are deleted on either system (depending on your sync
+     * settings), please change this to false. If you have the one way sync setup, then deleting a ticket on the slave
+     * will mean it comes back automatically, that has nothing to do with this setting. That is the way the one way sync
+     * works.
+     */
+    'deleteTasks' => true,
+
+    /*
+     * Set the following option to true to label all synced issues in Github with the 'tasksoup' label. This label
+     * cannot be changed, because Tasksoup is an awesome name.
+     */
+    'labelTasksoup' => true,
+
+    /*
+     * If you set labelType to true this will try to sync or create the label on the newly created issue in Github. And
+     * if a label is changed in Github it will try to update it in Tasksoup depending on your sync settings.
+     *
+     * The labelTypeMap is to make sure the labels in github map to the appropriate type in Tasksoup. This map is in the
+     * format 'tasksoup type' => 'github label'. Please configure according to your wishes.
+     *
+     * In normal unedited tasksoup, types are mapped to integers as followed:
+     * 0 => 'Bug',
+     * 1 => 'Change',
+     * 2 => 'Improvement',
+     * 3 => 'Feature',
+     * 4 => 'Task'
+     */
+    'labelType' => true,
+    'labelTypeMap' => [
+        0 => 'bug',
+        1 => 'change',
+        2 => 'improvement',
+        3 => 'feature',
+        4 => 'task'
+    ],
+
+    /*
+     * If you set removeLabels to true it will always remove all Github labels and sync the labels according to your
+     * settings again in this config. This prevents multiple 'type' labels that Tasksoup can't handle. Leave it off if
+     * you add custom labels in Github.
+     */
+    'removeLabels' => false,
+];

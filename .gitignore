@@ -1,3 +1,7 @@
 database
-*.sql
+database/*.sql
+./*.sql
 .idea/*
+syncgithub/config.php
+syncgithub/composer.lock
+syncgithub/vendor/*
