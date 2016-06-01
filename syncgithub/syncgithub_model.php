@@ -131,9 +131,57 @@ class SyncGitHub
         return $issue;
     }
 
-    public function deleteIssue($issue)
+    public function closeIssue($issue, $reason)
     {
+        if (!isset($issue['id'])) {
+            throw new Exception('Issue id is not set. Can\'t close an issue without an id. This could be a database issue.');
+        }
+        $issue['state'] = 'closed';
+        $issue = $this->updateIssue($issue);
+        $this->createIssueComment($issue, [
+            'title' => $reason,
+            'body' => "Closing issue ($issue[id]), because task on tasksoup was $reason."
+        ], $reason);
+        return $issue;
+    }
 
+    public function reOpenIssue($issue)
+    {
+        if (!isset($issue['id'])) {
+            throw new Exception('Issue id is not set. Can\'t close an issue without an id. This could be a database issue.');
+        }
+        $issue['state'] = 'open';
+        $issue = $this->updateIssue($issue);
+        $this->createIssueComment($issue, [
+            'title' => 'reopened',
+            'body' => "Reopening issue ($issue[id]), because task on tasksoup was reopened."
+        ], 'reopened');
+        return $issue;
+    }
+
+    /**
+     * Leaves a comment on the given issue on Github. Comment array exists of a non mandatory 'title' and a mandatory
+     * 'body' key value pair.
+     *
+     * @param array $issue
+     * @param array $comment
+     * @param string $reason Fill in a reason for the comment. This will only appear in the error log if creation fails.
+     * @throws Exception when an issue id is not set.
+     */
+    public function createIssueComment($issue, $comment, $reason = 'unknown')
+    {
+        $comment['title'] = ucfirst($comment['title']);
+        if (!isset($issue['id'])) {
+            throw new Exception('Issue id is not set. Can\'t comment on an issue without an id. This could be a database issue.');
+        }
+        try {
+            $this->gitClient->api('issue')->comments()
+                ->create(SyncApp::$config['gitLocation'], SyncApp::$config['gitRepo'], $issue['id'], $comment);
+        } catch (Exception $e) {
+            SyncApp::log(SyncApp::LOG_ERROR, "Failed to leave a comment on issue ($issue[id]) on github, for $reason reasons.");
+            SyncApp::log(SyncApp::LOG_DEBUG, $e->getMessage());
+            throw $e;
+        }
     }
 
     /**
@@ -174,15 +222,62 @@ SQL
      * latest status. This will return an array of beans, and can be optimised by returning the sync table with it, but
      * no need for it now since it is a console application.
      *
+     * In addition, this gets the tasks that are REOPENED in tasksoup, so we may reopen them again in the sync as well.
+     *
      * @return array
      */
     public function getAllOpenSyncGitHub()
     {
         $records = R::getAll(<<<SQL
-SELECT syncgithub.* 
+SELECT syncgithub.*
 FROM task
-INNER JOIN syncgithub ON syncgithub.task_id = task.id
-WHERE syncgithub.done = 0;
+  INNER JOIN syncgithub ON syncgithub.task_id = task.id
+  LEFT JOIN period ON task.period_id = period.id
+WHERE syncgithub.done = 0 
+  OR (
+    syncgithub.issue_id IS NOT NULL
+    AND task.id IS NOT NULL
+    AND syncgithub.done = 1
+    AND (task.done = 0 OR task.done IS NULL)
+    AND (period.closed = 0 OR period.closed IS NULL)
+  )
+SQL
+        );
+        return R::convertToBeans('syncgithub', $records);
+    }
+
+    /**
+     * This will search the database for any open sync items by hash. It won't search through the closed syncs. This is
+     * to detect if a similar ticket is open in sync, aka a copy. Returns a bean if found, null if nothing is found.
+     *
+     * @param string $hash
+     * @return \RedBeanPHP\OODBBean|null
+     */
+    public function getOpenSyncGitHubByHash($hash)
+    {
+        return R::findOne('syncgithub', 'checksum = ? AND (done IS NULL OR done = 0)', [$hash]);
+    }
+
+    /**
+     * Returns all open sync items that either have:
+     *  - A closed task attached now.
+     *  - A closed period attached now.
+     *  - No task attached at all.
+     *
+     * Careful when checking tasks with these sync items, because there might be deleted items in there that do not have
+     * a task attached anymore.
+     *
+     * @return array
+     */
+    public function getClosedOrDeletedSyncs()
+    {
+        $records = R::getAll(<<<SQL
+SELECT syncgithub.* 
+FROM syncgithub
+LEFT JOIN task ON  syncgithub.task_id = task.id
+LEFT JOIN period ON task.period_id = period.id
+WHERE (syncgithub.done = 0 OR syncgithub.done IS NULL)
+  AND (period.closed = 1 OR task.done = 1 OR task.id IS NULL)
 SQL
         );
         return R::convertToBeans('syncgithub', $records);
@@ -197,7 +292,6 @@ SQL
      */
     public function getSimplifiedComment($taskBean)
     {
-        $tasksoupUrl = SyncApp::$config['tasksoupUrl'];
         $comment = <<<COMMENT
 **Description:**
 $taskBean->description
@@ -210,8 +304,6 @@ $taskBean->notes
 **Contact:** _{$taskBean->project}_
 **Contact:** _{$taskBean->budget}_
 **Due:** _{$taskBean->due}_
-
-[Task on tasksoup]({$tasksoupUrl}?c=edittask&id={$taskBean->id})
 COMMENT;
         return $comment;
     }
@@ -272,9 +364,10 @@ COMMENT;
      */
     public function getIssueFromTask($taskBean)
     {
+        $tasksoupUrl = SyncApp::$config['tasksoupUrl'];
         return [
             'title' => $taskBean->name,
-            'body' => $this->getSimplifiedComment($taskBean),
+            'body' => $this->getSimplifiedComment($taskBean) . "\n\n[Task on tasksoup]({$tasksoupUrl}?c=edittask&id={$taskBean->id})",
             'labels' => $this->getIssueLabelsFromTask($taskBean),
             'assignee' => '',
         ];
@@ -303,5 +396,20 @@ COMMENT;
             SyncApp::log(SyncApp::LOG_WARNING, "Task type for task not set, please update task ($taskBean->id) $taskBean->name.");
         }
         return $labels;
+    }
+
+    /**
+     * Returns true if the task is deemed too empty, too little fields filled, to be newly created and synced. This
+     * prevents duplicates, or wrongly thinking an issue is copied because the hash matches another empty ticket.
+     *
+     * @param $taskBean
+     * @return bool
+     */
+    public function isEmpty($taskBean)
+    {
+        if (trim($taskBean->description) == '' && trim($taskBean->notes) == '' && strlen($taskBean->title) < 8) {
+            return true;
+        }
+        return false;
     }
 }

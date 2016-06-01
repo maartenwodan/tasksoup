@@ -65,6 +65,36 @@ class SyncApp
         // Create new tasks
         $openTasks = $model->getAllNewOpenTasks();
         foreach ($openTasks as $task) {
+            // First compare hashes with open tickets, if the option is enabled.
+            if (self::$config['preventCopies']) {
+                $openSync = $model->getOpenSyncGitHubByHash($model->getTaskHash($task));
+
+                if ($model->isEmpty($task)) {
+                    // Task is deemed too empty, continue regardless if it is a copied or new task.
+                    self::log(self::LOG_WARNING, "Task ($task->id) is empty, short title and no description or notes. Doing nothing.");
+                    continue;
+                } elseif (!is_null($openSync) && $openSync->task->period_id != $task->period_id) {
+                    // Found match.
+                    $copy = $openSync->task;
+                    self::log(self::LOG_INFO, "Found copied task ($copy->id)->($task->id):  $copy->name.");
+                    self::log(self::LOG_INFO, "Disabling old task, enabling new one...");
+                    R::begin();
+                    try {
+                        $model->saveSync($model->createSyncBean($task, ['id' => $openSync->issue_id]));
+                        $openSync->issue_id = null;
+                        $openSync->done = 1;
+                        $model->saveSync($openSync);
+                        R::commit();
+                    } catch (Exception $e) {
+                        self::log(self::LOG_ERROR, "Caught exception while disabling old task, or enabling new. Doing nothing.");
+                        self::log(self::LOG_DEBUG, $e->getMessage());
+                        R::rollback();
+                    }
+                    continue;
+                }
+            }
+
+            // Creating ticket.
             self::log(self::LOG_INFO, "Creating issue ($task->id):  $task->name");
             self::log(self::LOG_INFO, 'Labels: ' . implode(', ', $model->getIssueLabelsFromTask($task)));
             R::begin();
@@ -74,10 +104,11 @@ class SyncApp
                 R::commit();
             } catch (Exception $e) {
                 self::log(self::LOG_ERROR, 'Failed to create task, rolling back changes.');
-                self::log(self::LOG_DEBUG, $e->getMessage());
-                if(isset($issue)) {
-                    $model->deleteIssue($issue);
+                if (isset($issue['id'])) {
+                    self::log(self::LOG_ERROR, "Issue ($issue[id]) was created and will now be closed on github.");
+                    $model->closeIssue($issue, 'Failed to sync new task, closing. Please check sync log for errors.');
                 }
+                self::log(self::LOG_DEBUG, $e->getMessage());
                 R::rollback();
             }
         }
@@ -87,8 +118,24 @@ class SyncApp
         foreach ($editSyncs as $sync) {
             $task = $sync->task;
 
+            // Reopen any issues that were closed.
+            if ($sync->done == 1 && !($task->done)) {
+                self::log(self::LOG_INFO, "Reopening issue from task ($task->id) to issue ($sync->issue_id).");
+                R::begin();
+                try {
+                    $model->reOpenIssue(['id' => $sync->issue_id], 'reopened');
+                    $sync->done = 0;
+                    $model->saveSync($sync);
+                    R::commit();
+                } catch (Exception $e) {
+                    self::log(self::LOG_ERROR, "Failed to reopen issue ($sync->issue_id), rolling back changes.");
+                    self::log(self::LOG_DEBUG, $e->getMessage());
+                    R::rollback();
+                }
+            }
+            // Actual update
             if ($model->getTaskHash($task) != $sync->checksum) {
-                self::log(self::LOG_INFO, "Updating issue from task ($task->id) to issue ($sync->issue_id)");
+                self::log(self::LOG_INFO, "Updating issue from task ($task->id) to issue ($sync->issue_id).");
                 R::begin();
                 try {
                     $issue = $model->getIssueFromTask($task);
@@ -101,11 +148,38 @@ class SyncApp
                 } catch (Exception $e) {
                     self::log(self::LOG_ERROR, 'Failed to update issue, rolling back changes.');
                     self::log(self::LOG_DEBUG, $e->getMessage());
-                    if (isset($issue)) {
-                        $model->deleteIssue($issue);
-                    }
                     R::rollback();
                 }
+            }
+        }
+
+        // Close existing tasks
+        $closedSyncs = $model->getClosedOrDeletedSyncs();
+        foreach ($closedSyncs as $sync) {
+            $task = $sync->task;
+            $method = 'closed';
+
+            if ($task->id === 0) {
+                // Task is deleted.
+                $method = 'deleted';
+            }
+            self::log(self::LOG_INFO, "Closing issue  ($sync->issue_id), because task ($task->id) was $method.");
+
+            R::begin();
+            try {
+                // Prepare sync, Redbean automatically removes task_id, prevent that.
+                $sync->done = 1;
+                $tmpTaskId = $sync->task_id;
+                $sync->task = null;
+                $sync->task_id = $tmpTaskId;
+
+                $model->saveSync($sync);
+                $model->closeIssue(['id' => $sync->issue_id], $method);
+                R::commit();
+            } catch (Exception $e) {
+                self::log(self::LOG_ERROR, 'Failed to close issue, rolling back changes.');
+                self::log(self::LOG_DEBUG, $e->getMessage());
+                R::rollback();
             }
         }
 

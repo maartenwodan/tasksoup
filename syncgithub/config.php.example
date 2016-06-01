@@ -50,6 +50,27 @@ return [
     'log' => 7,
 
     /*
+     * Try to prevent creating new issues on github for freshly copied tasksoup items. In tasksoup you have the ability
+     * to copy tasks to the next period. If you turn this option on, it will automatically try to prevent creating new
+     * tickets in github, but instead make the github ticket reference to the newly copied task. This means the old
+     * tasksoup task will not be synced anymore, and treated as a closed task.
+     *
+     * The way this works is by comparing hashes with open sync tasks before copying new tasks to github. If it finds a
+     * matching hash, it will check if het period_id differs for the tickets, if so, it will see it as a copy. If the
+     * period_id does match, it will see it as a fluke of a newly created ticket that by coincidence matches another and
+     * treats it just like any other new ticket.
+     *
+     * When this is turned on, you will also check if a ticket is too empty to be created. This way you can prevent
+     * tickets which are too empty to be hashed and checked, causing wrong matches, wrong syncs, etc.
+     *
+     * There is one exception however when enabling this option, when you copy a task twice, unbeknown to you or someone
+     * else, there will be a new issue for this task. This is wanted behavior, since if you copy a task twice to split
+     * it on purpose in smaller tasks, you will want the second task to be synced as well. If you do NOT want it, and it
+     * IS an accident, then delete the second copied task and the issue on github should be closed automatically.
+     */
+    'preventCopies' => true,
+
+    /*
      * If you don't want to automatically delete tickets when they are deleted on either system (depending on your sync
      * settings), please change this to false. If you have the one way sync setup, then deleting a ticket on the slave
      * will mean it comes back automatically, that has nothing to do with this setting. That is the way the one way sync

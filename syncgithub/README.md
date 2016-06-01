@@ -82,7 +82,7 @@ Closing:
  - Close any tickets on github IN the relationship table but NOT in the
  open tasks query.
  - Leave comment on github ticket stating the date it was closed in
- tasksoup.
+ tasksoup. Or if it was deleted.
 
 Deleting (optional):
 
