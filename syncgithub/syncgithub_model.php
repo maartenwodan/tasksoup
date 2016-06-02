@@ -467,7 +467,7 @@ COMMENT;
      */
     public function isEmpty($taskBean)
     {
-        if (trim($taskBean->description) == '' && trim($taskBean->notes) == '' && strlen($taskBean->title) < 8) {
+        if (trim($taskBean->description) == '' && trim($taskBean->notes) == '' && strlen($taskBean->name) < 8) {
             return true;
         }
         return false;
