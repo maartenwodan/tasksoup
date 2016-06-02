@@ -1,5 +1,5 @@
 <?php
-return [
+return array(
     /*
      * Database location, probably the same as the tasksoup one.
      */
@@ -28,9 +28,9 @@ return [
      * as key, and the username of github as the value. The example is given with comment slashes in front, remove them
      * if you copy paste it. The names are case sensitive.
      */
-    'nameMap' => [
+    'nameMap' => array(
         //'TasksoupNick' => 'GitHubUser',
-    ],
+    ),
 
     /*
      * The synctype, default is 'tasksoup-sync'. There are four types, all based on whether you want a two way sync and
@@ -108,13 +108,13 @@ return [
      * 4 => 'Task'
      */
     'labelType' => true,
-    'labelTypeMap' => [
+    'labelTypeMap' => array(
         0 => 'bug',
         1 => 'change',
         2 => 'improvement',
         3 => 'feature',
         4 => 'task'
-    ],
+    ),
 
     /*
      * If you set removeLabels to true it will always remove all Github labels and sync the labels according to your
@@ -122,4 +122,4 @@ return [
      * you add custom labels in Github.
      */
     'removeLabels' => false,
-];
+);

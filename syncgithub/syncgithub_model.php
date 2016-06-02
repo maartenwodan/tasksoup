@@ -454,6 +454,9 @@ COMMENT;
                 }
             }
         }
+        if ($matchOne && empty($assignees)) {
+            return '';
+        }
         return $assignees;
     }
 

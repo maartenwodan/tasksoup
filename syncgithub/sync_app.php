@@ -105,7 +105,7 @@ class SyncApp
                     $model->saveSync($model->createSyncBean($task, $issue));
                     R::commit();
                 } catch (Exception $e) {
-                    self::log(self::LOG_ERROR, 'Failed to create task, rolling back changes.');
+                    self::log(self::LOG_ERROR, 'Failed to create issue, rolling back changes.');
                     if (isset($issue['id'])) {
                         self::log(self::LOG_ERROR, "Issue ($issue[id]) was created and will now be closed on github.");
                         $model->closeIssue($issue, 'Failed to sync new task, closing. Please check sync log for errors.');
