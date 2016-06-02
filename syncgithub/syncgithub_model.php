@@ -160,6 +160,34 @@ class SyncGitHub
     }
 
     /**
+     * Checks the github rate, and if it is exceeded throws an exception.
+     *
+     * @todo Make this a variable that can be accessed easily anywhere in the model. This way we can check it before doing anything.     *
+     * @return bool True if the rate is fine, false if the rate is exceeded.
+     * @throws Exception
+     */
+    public function checkGitHubApiRateLimit()
+    {
+        try {
+            $rateLimit = $this->gitClient->api('rate_limit')->getRateLimits();
+            $remaining = $rateLimit['resources']['core']['remaining'];
+            $limit = $rateLimit['resources']['core']['limit'];
+            $resetOn = (new DateTime($rateLimit['resources']['core']['limit']))->format(DateTime::ISO8601);
+            SyncApp::log(SyncApp::LOG_INFO, "Github rate limit: $remaining/$limit, resets on $resetOn");
+        } catch (Exception $e) {
+            SyncApp::log(SyncApp::LOG_ERROR, "Can't seem to connect to the GitHub api. Stopping.");
+            SyncApp::log(SyncApp::LOG_DEBUG, $e->getMessage());
+        }
+        if ($remaining == 0) {
+            SyncApp::log(SyncApp::LOG_ERROR, "Rate limit exceeded.");
+            return false;
+        } elseif ($remaining < 100) {
+            SyncApp::log(SyncApp::LOG_WARNING, "Almost out of calls to make to the GitHub api.");
+        }
+        return true;
+    }
+
+    /**
      * Leaves a comment on the given issue on Github. Comment array exists of a non mandatory 'title' and a mandatory
      * 'body' key value pair.
      *
