@@ -440,13 +440,14 @@ COMMENT;
     public function getIssueAssigneesFromTask($taskBean, $matchOne = false)
     {
         $assignees = array();
+        $assignee = '';
         $hours = $taskBean->ownWork;
         $highestHours = 0;
         foreach ($hours as $hr) {
             if ($matchOne && $hr->hours > $highestHours) {
                 $highestHours = $hr->hours;
                 if (isset(SyncApp::$config['nameMap'][$hr->user->nick])) {
-                    $assignees = SyncApp::$config['nameMap'][$hr->user->nick];
+                    $assignee = SyncApp::$config['nameMap'][$hr->user->nick];
                 }
             } elseif ($hr->hours > 0) {
                 if (isset(SyncApp::$config['nameMap'][$hr->user->nick])) {
@@ -454,10 +455,7 @@ COMMENT;
                 }
             }
         }
-        if ($matchOne && empty($assignees)) {
-            return '';
-        }
-        return $assignees;
+        return $matchOne ? $assignee : $assignees;
     }
 
     /**
