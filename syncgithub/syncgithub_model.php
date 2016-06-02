@@ -55,12 +55,12 @@ class SyncGitHub
 
     public function getSyncBeanFromTask($taskBean)
     {
-        return R::findOne('syncgithub', 'task_id = ? AND issue_id NOT NULL', [$taskBean->id]);
+        return R::findOne('syncgithub', 'task_id = ? AND issue_id NOT NULL', array($taskBean->id));
     }
 
     public function getSyncBeanFromIssue($issue)
     {
-        return R::findOne('syncgithub', 'issue_id = ?', [$issue['id']]);
+        return R::findOne('syncgithub', 'issue_id = ?', array($issue['id']));
     }
 
     public function deleteSync($syncBean)
@@ -138,10 +138,10 @@ class SyncGitHub
         }
         $issue['state'] = 'closed';
         $issue = $this->updateIssue($issue);
-        $this->createIssueComment($issue, [
+        $this->createIssueComment($issue, array(
             'title' => $reason,
             'body' => "Closing issue ($issue[id]), because task on tasksoup was $reason."
-        ], $reason);
+        ), $reason);
         return $issue;
     }
 
@@ -152,10 +152,10 @@ class SyncGitHub
         }
         $issue['state'] = 'open';
         $issue = $this->updateIssue($issue);
-        $this->createIssueComment($issue, [
+        $this->createIssueComment($issue, array(
             'title' => 'reopened',
             'body' => "Reopening issue ($issue[id]), because task on tasksoup was reopened."
-        ], 'reopened');
+        ), 'reopened');
         return $issue;
     }
 
@@ -163,6 +163,7 @@ class SyncGitHub
      * Checks the github rate, and if it is exceeded throws an exception.
      *
      * @todo Make this a variable that can be accessed easily anywhere in the model. This way we can check it before doing anything.     *
+     * @todo Do not exit here.
      * @return bool True if the rate is fine, false if the rate is exceeded.
      * @throws Exception
      */
@@ -172,11 +173,13 @@ class SyncGitHub
             $rateLimit = $this->gitClient->api('rate_limit')->getRateLimits();
             $remaining = $rateLimit['resources']['core']['remaining'];
             $limit = $rateLimit['resources']['core']['limit'];
-            $resetOn = (new DateTime($rateLimit['resources']['core']['limit']))->format(DateTime::ISO8601);
+            $resetOn = new DateTime('@' . $rateLimit['resources']['core']['reset']);
+            $resetOn = $resetOn->format(DateTime::ISO8601);
             SyncApp::log(SyncApp::LOG_INFO, "Github rate limit: $remaining/$limit, resets on $resetOn");
         } catch (Exception $e) {
             SyncApp::log(SyncApp::LOG_ERROR, "Can't seem to connect to the GitHub api. Stopping.");
             SyncApp::log(SyncApp::LOG_DEBUG, $e->getMessage());
+            exit();
         }
         if ($remaining == 0) {
             SyncApp::log(SyncApp::LOG_ERROR, "Rate limit exceeded.");
@@ -283,7 +286,7 @@ SQL
      */
     public function getOpenSyncGitHubByHash($hash)
     {
-        return R::findOne('syncgithub', 'checksum = ? AND (done IS NULL OR done = 0)', [$hash]);
+        return R::findOne('syncgithub', 'checksum = ? AND (done IS NULL OR done = 0)', array($hash));
     }
 
     /**
@@ -393,12 +396,12 @@ COMMENT;
     public function getIssueFromTask($taskBean)
     {
         $tasksoupUrl = SyncApp::$config['tasksoupUrl'];
-        return [
+        return array(
             'title' => $taskBean->name,
             'body' => $this->getSimplifiedComment($taskBean) . "\n\n[Task on tasksoup]({$tasksoupUrl}?c=edittask&id={$taskBean->id})",
             'labels' => $this->getIssueLabelsFromTask($taskBean),
             'assignee' => $this->getIssueAssigneesFromTask($taskBean, true),
-        ];
+        );
     }
 
     /**
@@ -410,7 +413,7 @@ COMMENT;
      */
     public function getIssueLabelsFromTask($taskBean)
     {
-        $labels = [];
+        $labels = array();
         if (SyncApp::$config['labelTasksoup']) {
             $labels[] = 'tasksoup';
         }
@@ -436,7 +439,7 @@ COMMENT;
      */
     public function getIssueAssigneesFromTask($taskBean, $matchOne = false)
     {
-        $assignees = [];
+        $assignees = array();
         $hours = $taskBean->ownWork;
         $highestHours = 0;
         foreach ($hours as $hr) {

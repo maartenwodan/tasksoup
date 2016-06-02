@@ -22,7 +22,8 @@ class SyncApp
     public static function log($level, $message)
     {
         if (self::$config['log'] & $level) {
-            $time = (new DateTime())->format(DateTime::ISO8601);
+            $time = new DateTime();
+            $time = $time->format(DateTime::ISO8601);
 
             switch ($level) {
                 case self::LOG_ERROR:
@@ -81,7 +82,7 @@ class SyncApp
                         self::log(self::LOG_INFO, "Disabling old task, enabling new one...");
                         R::begin();
                         try {
-                            $model->saveSync($model->createSyncBean($task, ['id' => $openSync->issue_id]));
+                            $model->saveSync($model->createSyncBean($task, array('id' => $openSync->issue_id)));
                             $openSync->issue_id = null;
                             $openSync->done = 1;
                             $model->saveSync($openSync);
@@ -124,7 +125,7 @@ class SyncApp
                     self::log(self::LOG_INFO, "Reopening issue from task ($task->id) to issue ($sync->issue_id).");
                     R::begin();
                     try {
-                        $model->reOpenIssue(['id' => $sync->issue_id], 'reopened');
+                        $model->reOpenIssue(array('id' => $sync->issue_id), 'reopened');
                         $sync->done = 0;
                         $model->saveSync($sync);
                         R::commit();
@@ -175,7 +176,7 @@ class SyncApp
                     $sync->task_id = $tmpTaskId;
 
                     $model->saveSync($sync);
-                    $model->closeIssue(['id' => $sync->issue_id], $method);
+                    $model->closeIssue(array('id' => $sync->issue_id), $method);
                     R::commit();
                 } catch (Exception $e) {
                     self::log(self::LOG_ERROR, 'Failed to close issue, rolling back changes.');
