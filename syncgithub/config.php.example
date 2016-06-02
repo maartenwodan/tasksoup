@@ -24,6 +24,15 @@ return [
     'gitCacheLocation' => '/tmp/github-api-cache',
 
     /*
+     * If you want to auto assign the tasksoup user to the issue in github, fill this array with nicknames in tasksoup
+     * as key, and the username of github as the value. The example is given with comment slashes in front, remove them
+     * if you copy paste it. The names are case sensitive.
+     */
+    'nameMap' => [
+        //'TasksoupNick' => 'GitHubUser',
+    ],
+
+    /*
      * The synctype, default is 'tasksoup-sync'. There are four types, all based on whether you want a two way sync and
      * which system will be deemed the master source. Any conflicts will be solved by just syncing the master first.
      *

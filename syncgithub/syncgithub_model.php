@@ -369,7 +369,7 @@ COMMENT;
             'title' => $taskBean->name,
             'body' => $this->getSimplifiedComment($taskBean) . "\n\n[Task on tasksoup]({$tasksoupUrl}?c=edittask&id={$taskBean->id})",
             'labels' => $this->getIssueLabelsFromTask($taskBean),
-            'assignee' => '',
+            'assignee' => $this->getIssueAssigneesFromTask($taskBean, true),
         ];
     }
 
@@ -396,6 +396,34 @@ COMMENT;
             SyncApp::log(SyncApp::LOG_WARNING, "Task type for task not set, please update task ($taskBean->id) $taskBean->name.");
         }
         return $labels;
+    }
+
+    /**
+     * This will get the hours assigned to a task for the different members of a team, and tries to map them to a github
+     * username. If no username is found in the mapping table, the assigned member is silently dropped.
+     *
+     * @param \RedBeanPHP\OODB $taskBean
+     * @param bool $matchOne Set this to true to only return a string with 1 user with the most hours in it.
+     * @return array|string
+     */
+    public function getIssueAssigneesFromTask($taskBean, $matchOne = false)
+    {
+        $assignees = [];
+        $hours = $taskBean->ownWork;
+        $highestHours = 0;
+        foreach ($hours as $hr) {
+            if ($matchOne && $hr->hours > $highestHours) {
+                $highestHours = $hr->hours;
+                if (isset(SyncApp::$config['nameMap'][$hr->user->nick])) {
+                    $assignees = SyncApp::$config['nameMap'][$hr->user->nick];
+                }
+            } elseif ($hr->hours > 0) {
+                if (isset(SyncApp::$config['nameMap'][$hr->user->nick])) {
+                    $assignees[] = SyncApp::$config['nameMap'][$hr->user->nick];
+                }
+            }
+        }
+        return $assignees;
     }
 
     /**
