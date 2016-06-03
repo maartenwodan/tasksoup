@@ -332,8 +332,8 @@ $taskBean->notes
 
 **Client:** _{$taskBean->client}_
 **Contact:** _{$taskBean->contact}_
-**Contact:** _{$taskBean->project}_
-**Contact:** _{$taskBean->budget}_
+**Project:** _{$taskBean->project}_
+**Budget:** _{$taskBean->budget}_
 **Due:** _{$taskBean->due}_
 COMMENT;
         return $comment;
