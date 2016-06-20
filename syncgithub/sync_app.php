@@ -82,10 +82,11 @@ class SyncApp
                         self::log(self::LOG_INFO, "Disabling old task, enabling new one...");
                         R::begin();
                         try {
+                            $issueId = $openSync->issue_id;
                             $openSync->issue_id = null;
                             $openSync->done = 1;
                             $model->saveSync($openSync);
-                            $model->saveSync($model->createSyncBean($task, array('id' => $openSync->issue_id)));
+                            $model->saveSync($model->createSyncBean($task, array('id' => $issueId)));
                             R::commit();
                         } catch (Exception $e) {
                             self::log(self::LOG_ERROR, "Caught exception while disabling old task, or enabling new. Doing nothing.");
