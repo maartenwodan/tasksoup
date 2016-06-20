@@ -166,7 +166,7 @@ class SyncApp
                     // Task is deleted.
                     $method = 'deleted';
                 }
-                self::log(self::LOG_INFO, "Closing issue  ($sync->issue_id), because task ($task->id) was $method.");
+                self::log(self::LOG_INFO, "Closing issue  ($sync->issue_id), because task ($sync->task_id) was $method.");
 
                 R::begin();
                 try {
