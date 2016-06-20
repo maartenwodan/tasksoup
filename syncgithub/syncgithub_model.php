@@ -42,7 +42,7 @@ class SyncGitHub
 
     public function createSyncBean($taskBean, $issue)
     {
-        if (!array_key_exists($issue['id'])) {
+        if (!array_key_exists('id', $issue)) {
             throw new Exception('Issue id is not set. Can\'t create a sync table entry.');
         }
         $syncBean = R::dispense('syncgithub');
