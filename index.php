@@ -537,6 +537,18 @@ switch( $cmd ) {
 			if ( $period->id == $task->period->id ) $periodOption->setSelected( 'selected' );
 			$taskEditor->add($periodOption);
 		}
+
+		$syncGitHub = R::findOne( 'syncgithub', ' task_id = ? ', array( get_param('id') ) );
+		if ($syncGitHub->id) {
+			if (!file_exists('syncgithub' . DIRECTORY_SEPARATOR . 'config.php')) {
+				throw new Exception ('SyncGitHub config.php does not exist, even though sync table does exist. Please create a config or uninstall SyncGitHub.');
+			}
+			$syncGitHubConfig = include_once('syncgithub' . DIRECTORY_SEPARATOR . 'config.php');
+			$syncGitHub = $taskEditor->getSyncGitHub()
+				->setGitHubLink('https://github.com/' . $syncGitHubConfig['gitLocation'] . '/' . $syncGitHubConfig['gitRepo'] . '/issues/' . $syncGitHub->issue_id)
+				->setGitHubIssueId($syncGitHub->issue_id);
+			$taskEditor->add($syncGitHub);
+		}
 		
 		$workList = $task->xownWorkList;
 		foreach($workList as $work) $workList[$work->user_id] = $work;
