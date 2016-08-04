@@ -85,8 +85,8 @@ class SyncApp
                             $issueId = $openSync->issue_id;
                             $openSync->issue_id = null;
                             $openSync->done = 1;
-                            $model->saveSync($openSync);
-                            $model->saveSync($model->createSyncBean($task, array('id' => $issueId)));
+                            $model->saveSyncBean($openSync);
+                            $model->saveSyncBean($model->createSyncBean($task, array('id' => $issueId)));
                             R::commit();
                         } catch (Exception $e) {
                             self::log(self::LOG_ERROR, "Caught exception while disabling old task, or enabling new. Doing nothing.");
@@ -103,7 +103,7 @@ class SyncApp
                 R::begin();
                 try {
                     $issue = $model->createIssue($model->getIssueFromTask($task));
-                    $model->saveSync($model->createSyncBean($task, $issue));
+                    $model->saveSyncBean($model->createSyncBean($task, $issue));
                     R::commit();
                 } catch (Exception $e) {
                     self::log(self::LOG_ERROR, 'Failed to create issue, rolling back changes.');
@@ -128,7 +128,7 @@ class SyncApp
                     try {
                         $model->reOpenIssue(array('id' => $sync->issue_id), 'reopened');
                         $sync->done = 0;
-                        $model->saveSync($sync);
+                        $model->saveSyncBean($sync);
                         R::commit();
                     } catch (Exception $e) {
                         self::log(self::LOG_ERROR, "Failed to reopen issue ($sync->issue_id), rolling back changes.");
@@ -146,7 +146,7 @@ class SyncApp
                         $model->updateIssue($issue);
 
                         $sync->checksum = $model->getTaskHash($task);
-                        $model->saveSync($sync);
+                        $model->saveSyncBean($sync);
                         R::commit();
                     } catch (Exception $e) {
                         self::log(self::LOG_ERROR, 'Failed to update issue, rolling back changes.');
@@ -176,7 +176,7 @@ class SyncApp
                     $sync->task = null;
                     $sync->task_id = $tmpTaskId;
 
-                    $model->saveSync($sync);
+                    $model->saveSyncBean($sync);
                     $model->closeIssue(array('id' => $sync->issue_id), $method);
                     R::commit();
                 } catch (Exception $e) {

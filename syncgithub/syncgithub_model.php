@@ -15,6 +15,11 @@ class SyncGitHub
      */
     public $gitClient;
 
+    /**
+     * SyncGitHub constructor.
+     *
+     * Creates the GitHub client api, and sets up cache if required by the configuration.
+     */
     public function __construct()
     {
         if (SyncApp::$config['gitCache']) {
@@ -28,7 +33,13 @@ class SyncGitHub
         $this->gitClient->authenticate(SyncApp::$config['gitToken'], null, Github\Client::AUTH_HTTP_TOKEN);
     }
 
-    public function saveSync($syncBean)
+    /**
+     * Saves a github sync bean to the database.
+     *
+     * @param \RedBeanPHP\OODBBean $syncBean
+     * @throws Exception
+     */
+    public function saveSyncBean($syncBean)
     {
         try {
             R::store($syncBean);
@@ -40,6 +51,17 @@ class SyncGitHub
         }
     }
 
+    /**
+     * Creates a sync bean from an issue array, and a task bean. This can be an issue array straight from the api or
+     * created from a task bean. The issue only requires the id to be set, the rest can be left empty.
+     *
+     * By default this is created as a completely new sync bean, so done 0 and no id.
+     *
+     * @param \RedBeanPHP\OODBBean $taskBean
+     * @param array $issue
+     * @return \RedBeanPHP\OODBBean
+     * @throws Exception
+     */
     public function createSyncBean($taskBean, $issue)
     {
         if (!array_key_exists('id', $issue)) {
@@ -53,17 +75,38 @@ class SyncGitHub
         return $syncBean;
     }
 
+    /**
+     * Returns a sync bean if it finds a sync bean for the given task bean.
+     *
+     * @param \RedBeanPHP\OODBBean $taskBean
+     * @return \RedBeanPHP\OODBBean
+     */
     public function getSyncBeanFromTask($taskBean)
     {
         return R::findOne('syncgithub', 'task_id = ? AND issue_id NOT NULL', array($taskBean->id));
     }
 
+    /**
+     * Returns a sync bean if it finds a sync bean for the given issue, only id has to be set for the issue.
+     *
+     * @param array $issue
+     * @return \RedBeanPHP\OODBBean
+     */
     public function getSyncBeanFromIssue($issue)
     {
         return R::findOne('syncgithub', 'issue_id = ?', array($issue['id']));
     }
 
-    public function deleteSync($syncBean)
+    /**
+     * Removes a sync bean from the database.
+     *
+     * _Warning_ When removed and the task still exists, it will recreate the issue on github. If the issue still exists
+     * then the task will be recreated depending on sync settings (master / slave).
+     *
+     * @param \RedBeanPHP\OODBBean $syncBean
+     * @throws Exception
+     */
+    public function deleteSyncBean($syncBean)
     {
         try {
             R::trash($syncBean);
@@ -75,6 +118,12 @@ class SyncGitHub
         }
     }
 
+    /**
+     * Saves a task to the database.
+     *
+     * @param \RedBeanPHP\OODBBean $taskBean
+     * @throws Exception
+     */
     public function saveTask($taskBean)
     {
         try {
@@ -88,6 +137,13 @@ class SyncGitHub
         }
     }
 
+    /**
+     * Deletes a task, probably deprecated because we shouldn't delete tasks in this api.
+     *
+     * @deprecated Marked as such because we don't want to delete tasks in this sync since github doesn't delete issues.
+     * @param \RedBeanPHP\OODBBean $taskBean
+     * @throws Exception
+     */
     public function deleteTask($taskBean)
     {
         try {
@@ -100,6 +156,16 @@ class SyncGitHub
         }
     }
 
+    /**
+     * Creates the issue given on GitHub via the API. Returns the issue array given, but filled with the created issue
+     * id on github.
+     *
+     * _Warning_ Actually calls the GitHub API.
+     *
+     * @param array $issue
+     * @return array
+     * @throws Exception
+     */
     public function createIssue($issue)
     {
         try {
@@ -115,6 +181,15 @@ class SyncGitHub
         return $issue;
     }
 
+    /**
+     * Updates the given issue on GitHub via the API. Returns the issue as it was given.
+     *
+     * _Warning_ Actually calls the GitHub API.
+     *
+     * @param array $issue
+     * @return array
+     * @throws Exception
+     */
     public function updateIssue($issue)
     {
         if (!isset($issue['id'])) {
@@ -131,6 +206,17 @@ class SyncGitHub
         return $issue;
     }
 
+    /**
+     * Closes the issue and creates a comment on GitHub via the API. Returns the issue as given, but now with 'state' =
+     * 'closed'. Reason is the reason the issue was closed and is left as a comment.
+     *
+     * _Warning_ Actually calls the GitHub API.
+     *
+     * @param array $issue
+     * @param string $reason
+     * @return array
+     * @throws Exception
+     */
     public function closeIssue($issue, $reason)
     {
         if (!isset($issue['id'])) {
@@ -145,6 +231,19 @@ class SyncGitHub
         return $issue;
     }
 
+    /**
+     * When an issue seems closed on GitHub, but should actually be opened, you can reopen it here. It also leaves a
+     * nice little comment behind on the issue so we know what happened. This can be called when the task on tasksoup
+     * is reopened.
+     *
+     * Returns the issue give, but now with 'state' = 'open'.
+     *
+     * _Warning_ Actually calls the GitHub API.
+     *
+     * @param array $issue
+     * @return array
+     * @throws Exception
+     */
     public function reOpenIssue($issue)
     {
         if (!isset($issue['id'])) {
@@ -161,6 +260,8 @@ class SyncGitHub
 
     /**
      * Checks the github rate, and if it is exceeded throws an exception.
+     *
+     * _Warning_ Actually calls the GitHub API. But doesn't count as of yet for your total.
      *
      * @todo Make this a variable that can be accessed easily anywhere in the model. This way we can check it before doing anything.     *
      * @todo Do not exit here.
@@ -193,6 +294,8 @@ class SyncGitHub
     /**
      * Leaves a comment on the given issue on Github. Comment array exists of a non mandatory 'title' and a mandatory
      * 'body' key value pair.
+     *
+     * _Warning_ Actually calls the GitHub API.
      *
      * @param array $issue
      * @param array $comment
@@ -389,7 +492,10 @@ COMMENT;
      * Returns an array with the fields set to be used straight as an issue in the github client api. This also empties
      * the assignee by default, this is a item.
      *
-     * @todo Base assignee on a hours mapped to a task, most hours is the assignee. Github soon has multiple assignees.
+     * This adds a URL to the body to easily go to the task in tasksoup. This is not included in the simplified comment
+     * because it is unique to every task, causing us not to be able to find copies between different tasks. (The id of
+     * the task is in the URL).
+     *
      * @param $taskBean
      * @return array
      */

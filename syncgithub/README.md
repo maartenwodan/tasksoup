@@ -1,6 +1,10 @@
 Sync GitHub
 ===========
 
+Features
+========
+
+ - Sync assigned to back and forth, only with username mapping.
 
 Install
 =======
@@ -35,8 +39,8 @@ Future
  - Sync priority with github prio's.
  - Sync usernames, contact can be @username if a map exists. Requires
  username mapping.
- - Sync assigned to, also with username mapping.
- - Sync Progress with whatever (zenhub?)
+ - Sync Progress with whatever (zenhub?).
+ - Connect with GitHooks instead of cron?
 
 Inner workings
 ==============
