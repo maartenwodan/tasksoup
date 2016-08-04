@@ -80,14 +80,6 @@ return array(
     'preventCopies' => true,
 
     /*
-     * If you don't want to automatically delete tickets when they are deleted on either system (depending on your sync
-     * settings), please change this to false. If you have the one way sync setup, then deleting a ticket on the slave
-     * will mean it comes back automatically, that has nothing to do with this setting. That is the way the one way sync
-     * works.
-     */
-    'deleteTasks' => true,
-
-    /*
      * Set the following option to true to label all synced issues in Github with the 'tasksoup' label. This label
      * cannot be changed, because Tasksoup is an awesome name.
      */
