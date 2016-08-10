@@ -64,6 +64,176 @@ class SyncApp
         $model = new SyncGitHub();
 
         if ($model->checkGitHubApiRateLimit()) {
+
+            // From github to tasksoup
+            $issues = $model->getAllIssues(true); // '2016-07-05 18:00:00'
+            self::log(self::LOG_INFO, "Going to try and check if " . count($issues) . " issues need to be synced.");
+            foreach ($issues as $issue) {
+                $syncBean = $model->getSyncBeanFromIssue($issue);
+                // Check if the syncbean exists, if it does, we should update the issue, if not, we should create a task.
+                if ($syncBean) {
+                    // Update the task if the hash differentiates, if so update the task.
+                    $checksum = $model->getIssueHash($issue);
+
+                    // Check if state has changed, with ones and zeroes for easy comparison to our table.
+                    $issueIsDone = $issue['state'] == 'closed' ? 1 : 0;
+
+                    // Updating task with new info here.
+                    if (!$issueIsDone && $syncBean->checksum != $checksum && $syncBean->task) {
+                        self::log(self::LOG_INFO, "Found modified issue ({$syncBean->issue_id}), so we can update task ({$syncBean->task_id}).");
+                        R::begin();
+                        try {
+                            $taskBean = $model->getTaskBeanFromIssue($issue, $syncBean->task);
+                            $model->saveTask($taskBean);
+                            $syncBean->checksum = $model->getTaskHash($taskBean);
+                            $model->saveSyncBean($syncBean);
+                            R::commit();
+                        } catch (Exception $e) {
+                            self::log(self::LOG_ERROR, 'Failed to update task, rolling back changes.');
+                            self::log(self::LOG_DEBUG, $e->getMessage());
+                            R::rollback();
+                        }
+                    }
+
+                    // Closing / Reopening here.
+                    if ($issueIsDone != $syncBean->done) {
+                        self::log(self::LOG_INFO, "Found state change for issue ({$syncBean->issue_id}), state is now {$issue['state']}.");
+                        if ($issueIsDone) {
+                            // Just closing the task and the sync and it's done!
+                            $syncBean->done = 1;
+                            $model->saveSyncBean($syncBean);
+
+                            // Only update task if it is attached and not deleted yet.
+                            if ($syncBean->task_id !== 0) {
+                                $task = $syncBean->task;
+                                $task->done = 1;
+                                $task->progress = 100;
+                                $task->end = date('Y-m-d');
+                                $model->saveTask($task);
+                            }
+                        } else {
+                            // Issue got reopened, what's going on! There are a few possibilities:
+                            // 1. Issue reopened, task is closed, period is current. => Just open task.
+                            // 2. Issue reopened, task was deleted. This means we have to recreate the task again.
+                            // 3. Issue reopened, task is closed, period has past => Copy task to nextPeriod
+                            // 4. Issue reopened, task is closed, period has yet to begin => Open again.
+                            // 5. Issue reopened, task is closed, has no period! Put it in next period, open again.
+                            self::log(self::LOG_INFO, "Issue reopened ({$issue['number']}).");
+                            if ($issue->task) {
+                                $taskBean = $issue->task;
+                                if ($taskBean) {
+                                    $period = $taskBean->period;
+                                    if ($period) {
+                                        $start = DateTime::createFromFormat('Y-m-d', $period->start);
+                                        $end = DateTime::createFromFormat('Y-m-d', $period->end);
+                                        $now = new Datetime('now');
+
+                                        if ($end > $now && $start < $now) {
+                                            // Situation 1. Current period
+                                            $taskBean->progress = 0;
+                                            $taskBean->done = 0;
+                                            R::begin();
+                                            try {
+                                                $model->saveTask($taskBean);
+                                                $syncBean->done = 0;
+                                                $model->saveSyncBean($syncBean);
+                                                R::commit();
+                                            } catch (Exception $e) {
+                                                self::log(self::LOG_ERROR, 'Failed to reopen task.');
+                                                self::log(self::LOG_DEBUG, $e->getMessage());
+                                                R::rollback();
+                                            }
+                                        } elseif ($end < $now) {
+                                            // Situation 3. Period has passed..
+                                            $period = $model->getNextPeriod();
+                                            if ($period) {
+                                                $taskBean->progress = 0;
+                                                $taskBean->done = 0;
+                                                R::begin();
+                                                try {
+                                                    $model->saveTask($taskBean);
+                                                    $syncBean->done = 0;
+                                                    $model->saveSyncBean($syncBean);
+                                                    R::commit();
+                                                } catch (Exception $e) {
+                                                    self::log(self::LOG_ERROR, 'Failed to reopen task.');
+                                                    self::log(self::LOG_DEBUG, $e->getMessage());
+                                                    R::rollback();
+                                                }
+                                            } else {
+                                                self::log(self::LOG_ERROR, "Can't find a period to copy newly reopened issue too, didn't do anything.");
+                                            }
+                                        } elseif ($start > $now) {
+                                            // Situation 4. Period has yet to start.
+                                            $taskBean->progress = 0;
+                                            $taskBean->done = 0;
+                                            R::begin();
+                                            try {
+                                                $model->saveTask($taskBean);
+                                                $syncBean->done = 0;
+                                                $model->saveSyncBean($syncBean);
+                                                R::commit();
+                                            } catch (Exception $e) {
+                                                self::log(self::LOG_ERROR, 'Failed to reopen task.');
+                                                self::log(self::LOG_DEBUG, $e->getMessage());
+                                                R::rollback();
+                                            }
+                                        } else {
+                                            // It shouldn't get here, something fishy happened.
+                                            self::log(self::LOG_ERROR, "Something fishy about period with id ({$period->id}), didn't do anything.");
+                                        }
+                                    } else {
+                                        // Situation 5. Invalid period.
+                                        $period = $model->getNextPeriod();
+                                        if ($period) {
+                                            $taskBean->period_id = $period->id;
+                                            $taskBean->progress = 0;
+                                            $taskBean->done = 0;
+                                            R::begin();
+                                            try {
+                                                $model->saveTask($taskBean);
+                                                $syncBean->done = 0;
+                                                $model->saveSyncBean($syncBean);
+                                                R::commit();
+                                            } catch (Exception $e) {
+                                                self::log(self::LOG_ERROR, 'Failed to reopen task.');
+                                                self::log(self::LOG_DEBUG, $e->getMessage());
+                                                R::rollback();
+                                            }
+                                        } else {
+                                            self::log(self::LOG_ERROR, "Can't find a period to copy newly reopened issue too, didn't do anything.");
+                                        }
+                                    }
+                                } else {
+                                    // Situation 2. Deleted task.
+                                    // @todo
+                                }
+                            }
+                        }
+                    }
+                } elseif ($issue['state'] == 'open') {
+                    // No syncBean, so we are creating a new task in tasksoup, and updating the body of the issue.
+                    R::begin();
+                    try {
+                        $taskBean = $model->getTaskBeanFromIssue($issue);
+                        self::log(self::LOG_INFO, "Creating task for issue ({$issue['number']}): $taskBean->name");
+                        $model->saveTask($taskBean);
+                        $model->saveSyncBean($model->createSyncBean($taskBean, $issue));
+
+                        $taskIssue = $model->getIssueFromTask($taskBean);
+                        $taskIssue['number'] = $issue['number'];
+                        unset($taskIssue['assignee']);
+                        unset($taskIssue['assignees']);
+                        $model->updateIssue($taskIssue);
+                        R::commit();
+                    } catch (Exception $e) {
+                        self::log(self::LOG_ERROR, 'Failed to create task, rolling back changes.');
+                        self::log(self::LOG_DEBUG, $e->getMessage());
+                        R::rollback();
+                    }
+                }
+            }
+
             // Create new tasks
             $openTasks = $model->getAllNewOpenTasks();
             foreach ($openTasks as $task) {
@@ -86,7 +256,7 @@ class SyncApp
                             $openSync->issue_id = null;
                             $openSync->done = 1;
                             $model->saveSyncBean($openSync);
-                            $model->saveSyncBean($model->createSyncBean($task, array('id' => $issueId)));
+                            $model->saveSyncBean($model->createSyncBean($task, array('number' => $issueId)));
                             R::commit();
                         } catch (Exception $e) {
                             self::log(self::LOG_ERROR, "Caught exception while disabling old task, or enabling new. Doing nothing.");
@@ -107,8 +277,8 @@ class SyncApp
                     R::commit();
                 } catch (Exception $e) {
                     self::log(self::LOG_ERROR, 'Failed to create issue, rolling back changes.');
-                    if (isset($issue['id'])) {
-                        self::log(self::LOG_ERROR, "Issue ($issue[id]) was created and will now be closed on github.");
+                    if (isset($issue['number'])) {
+                        self::log(self::LOG_ERROR, "Issue ({$issue['number']}) was created and will now be closed on github.");
                         $model->closeIssue($issue, 'Failed to sync new task, closing. Please check sync log for errors.');
                     }
                     self::log(self::LOG_DEBUG, $e->getMessage());
@@ -126,7 +296,7 @@ class SyncApp
                     self::log(self::LOG_INFO, "Reopening issue from task ($task->id) to issue ($sync->issue_id).");
                     R::begin();
                     try {
-                        $model->reOpenIssue(array('id' => $sync->issue_id), 'reopened');
+                        $model->reOpenIssue(array('number' => $sync->issue_id), 'reopened');
                         $sync->done = 0;
                         $model->saveSyncBean($sync);
                         R::commit();
@@ -142,7 +312,7 @@ class SyncApp
                     R::begin();
                     try {
                         $issue = $model->getIssueFromTask($task);
-                        $issue['id'] = $sync->issue_id;
+                        $issue['number'] = $sync->issue_id;
                         $model->updateIssue($issue);
 
                         $sync->checksum = $model->getTaskHash($task);
@@ -177,7 +347,7 @@ class SyncApp
                     $sync->task_id = $tmpTaskId;
 
                     $model->saveSyncBean($sync);
-                    $model->closeIssue(array('id' => $sync->issue_id), $method);
+                    $model->closeIssue(array('number' => $sync->issue_id), $method);
                     R::commit();
                 } catch (Exception $e) {
                     self::log(self::LOG_ERROR, 'Failed to close issue, rolling back changes.');

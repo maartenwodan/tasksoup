@@ -42,6 +42,7 @@ class SyncGitHub
     public function saveSyncBean($syncBean)
     {
         try {
+            $syncBean->modified = date('Y-m-d H:i:s');
             R::store($syncBean);
         } catch (Exception $e) {
             SyncApp::log(SyncApp::LOG_ERROR, 'Can\'t save to sync table.');
@@ -64,14 +65,15 @@ class SyncGitHub
      */
     public function createSyncBean($taskBean, $issue)
     {
-        if (!array_key_exists('id', $issue)) {
+        if (!array_key_exists('number', $issue)) {
             throw new Exception('Issue id is not set. Can\'t create a sync table entry.');
         }
         $syncBean = R::dispense('syncgithub');
         $syncBean->task_id = $taskBean->id;
-        $syncBean->issue_id = $issue['id'];
+        $syncBean->issue_id = $issue['number'];
         $syncBean->checksum = $this->getTaskHash($taskBean);
         $syncBean->done = 0;
+        $syncBean->modified = date('Y-m-d H:i:s');
         return $syncBean;
     }
 
@@ -94,7 +96,7 @@ class SyncGitHub
      */
     public function getSyncBeanFromIssue($issue)
     {
-        return R::findOne('syncgithub', 'issue_id = ?', array($issue['id']));
+        return R::findOne('syncgithub', 'issue_id = ?', array($issue['number']));
     }
 
     /**
@@ -172,7 +174,7 @@ class SyncGitHub
             $newIssue = $this->gitClient->api('issue')
                 ->create(SyncApp::$config['gitLocation'], SyncApp::$config['gitRepo'], $issue);
             // Number maps straight to the issue id.
-            $issue['id'] = $newIssue['number'];
+            $issue['number'] = $newIssue['number'];
         } catch (Exception $e) {
             SyncApp::log(SyncApp::LOG_ERROR, "Failed to create issue on github.");
             SyncApp::log(SyncApp::LOG_DEBUG, $e->getMessage());
@@ -192,14 +194,14 @@ class SyncGitHub
      */
     public function updateIssue($issue)
     {
-        if (!isset($issue['id'])) {
+        if (!isset($issue['number'])) {
             throw new Exception('Issue id is not set. Can\'t update an issue without an id. This could be a database issue.');
         }
         try {
             $this->gitClient->api('issue')
-                ->update(SyncApp::$config['gitLocation'], SyncApp::$config['gitRepo'], $issue['id'], $issue);
+                ->update(SyncApp::$config['gitLocation'], SyncApp::$config['gitRepo'], $issue['number'], $issue);
         } catch (Exception $e) {
-            SyncApp::log(SyncApp::LOG_ERROR, "Failed to update issue ($issue[id]) on github.");
+            SyncApp::log(SyncApp::LOG_ERROR, "Failed to update issue ({$issue['number']}) on github.");
             SyncApp::log(SyncApp::LOG_DEBUG, $e->getMessage());
             throw $e;
         }
@@ -219,14 +221,14 @@ class SyncGitHub
      */
     public function closeIssue($issue, $reason)
     {
-        if (!isset($issue['id'])) {
+        if (!isset($issue['number'])) {
             throw new Exception('Issue id is not set. Can\'t close an issue without an id. This could be a database issue.');
         }
         $issue['state'] = 'closed';
         $issue = $this->updateIssue($issue);
         $this->createIssueComment($issue, array(
             'title' => $reason,
-            'body' => "Closing issue ($issue[id]), because task on tasksoup was $reason."
+            'body' => "Closing issue ({$issue['number']}), because task on tasksoup was $reason."
         ), $reason);
         return $issue;
     }
@@ -246,14 +248,14 @@ class SyncGitHub
      */
     public function reOpenIssue($issue)
     {
-        if (!isset($issue['id'])) {
+        if (!isset($issue['number'])) {
             throw new Exception('Issue id is not set. Can\'t close an issue without an id. This could be a database issue.');
         }
         $issue['state'] = 'open';
         $issue = $this->updateIssue($issue);
         $this->createIssueComment($issue, array(
             'title' => 'reopened',
-            'body' => "Reopening issue ($issue[id]), because task on tasksoup was reopened."
+            'body' => "Reopening issue ({$issue['number']}), because task on tasksoup was reopened."
         ), 'reopened');
         return $issue;
     }
@@ -305,17 +307,74 @@ class SyncGitHub
     public function createIssueComment($issue, $comment, $reason = 'unknown')
     {
         $comment['title'] = ucfirst($comment['title']);
-        if (!isset($issue['id'])) {
+        if (!isset($issue['number'])) {
             throw new Exception('Issue id is not set. Can\'t comment on an issue without an id. This could be a database issue.');
         }
         try {
             $this->gitClient->api('issue')->comments()
-                ->create(SyncApp::$config['gitLocation'], SyncApp::$config['gitRepo'], $issue['id'], $comment);
+                ->create(SyncApp::$config['gitLocation'], SyncApp::$config['gitRepo'], $issue['number'], $comment);
         } catch (Exception $e) {
-            SyncApp::log(SyncApp::LOG_ERROR, "Failed to leave a comment on issue ($issue[id]) on github, for $reason reasons.");
+            SyncApp::log(SyncApp::LOG_ERROR, "Failed to leave a comment on issue ({$issue['number']}) on github, for $reason reasons.");
             SyncApp::log(SyncApp::LOG_DEBUG, $e->getMessage());
             throw $e;
         }
+    }
+
+    /**
+     * Get's all the issues straight from GitHub. Param $since defaults to false, which means getting all issues. When
+     * there is lots and lots of issues to be synced, it might have a race condition where between the start of the
+     * script and the end, an issue will be changed. This issue won't be taken into account when syncing because the
+     * last modified already took place, because of this you can configure a 'modifiedDiscrepancy' value in your config.
+     *
+     * _Warning_ Actually calls the GitHub API.
+     *
+     * @param bool|string $since Date time in 'Y-m-d H:i:s', or false if you need all issues, or true if you only need
+     * the issues since the last modified sync.
+     * @throws Exception when it can't get the issues from the api.
+     * @return array|mixed
+     */
+    public function getAllIssues($since = false)
+    {
+        $paginator = new Github\ResultPager($this->gitClient);
+        $api = $this->gitClient->api('issue');
+
+        $params = array('state' => 'all');
+        if ($since === true) {
+            $syncBean = R::findOne('syncgithub', 'ORDER BY modified DESC');
+            if ($syncBean) {
+                $params['since'] = DateTime::createFromFormat('Y-m-d H:i:s', $syncBean->modified)
+                    ->modify(SyncApp::$config['modifiedDiscrepancy'])
+                    ->format(DateTime::ISO8601);
+            } else {
+                $datetime = new DateTime('now');
+                $params['since'] = $datetime
+                    ->modify(SyncApp::$config['modifiedDiscrepancy'])
+                    ->format(DateTime::ISO8601);;
+            }
+        } elseif ($since) {
+            $params['since'] = DateTime::createFromFormat('Y-m-d H:i:s', $since)
+                ->modify(SyncApp::$config['modifiedDiscrepancy'])
+                ->format(DateTime::ISO8601);
+        }
+
+        try {
+            $result = $paginator->fetchAll($api, 'all', array(
+                SyncApp::$config['gitLocation'],
+                SyncApp::$config['gitRepo'],
+                $params
+            ));
+        } catch (Exception $e) {
+            $since = var_export($since, true);
+            SyncApp::log(SyncApp::LOG_ERROR, "Could not retrieve any issues from GitHub, since was set to '$since'");
+            throw $e;
+        }
+        // Removing any pull requests from the result array.
+        foreach ($result as $key => $issue) {
+            if (isset($issue['pull_request']) && is_array($issue['pull_request'])) {
+                unset($result[$key]);
+            }
+        }
+        return $result;
     }
 
     /**
@@ -348,6 +407,24 @@ WHERE task.id NOT IN (
 SQL
         );
         return R::convertToBeans('task', $records);
+    }
+
+    /**
+     * Returns the next period if it finds one, otherwise it will return null.
+     * @return \RedBeanPHP\OODBBean|null
+     */
+    public function getNextPeriod()
+    {
+        return R::findOne('period', 'start > ? AND closed = 0', array(date('Y-m-d')));
+    }
+
+    /**
+     * Returns the latest available period, or null if there are no periods.
+     * @return \RedBeanPHP\OODBBean|null
+     */
+    public function getLatestAvailablePeriod()
+    {
+        return R::findOne('period', 'closed = 0 ORDER BY end DESC');
     }
 
     /**
@@ -451,23 +528,134 @@ COMMENT;
     public function getTaskHash($taskBean)
     {
         return sha1($this->getSimplifiedComment($taskBean)
-            . $taskBean->title
+            . $taskBean->name
             . $taskBean->type
         );
     }
 
     /**
-     * Makes the hash of the github issue body, title, and label.
+     * Makes the hash of the github issue body, title, and label. Makes sure the tasksoup url is stripped from the body
+     * before performing the hashing operation.
      *
-     * @param $issue
+     * @param array $issue
      * @return string
      */
     public function getIssueHash($issue)
     {
+        $issue = $this->stripTasksoupUrlFromIssue($issue);
         return sha1($issue['body']
             . $issue['title']
             . $this->getTaskTypeFromIssue($issue)
         );
+    }
+
+    /**
+     * Creates a task bean from the given issue array. This will try to extract values from the issue body, and if that
+     * fails cleanly, it will set the full body as the description of the task.
+     *
+     * If a task bean is given, instead of creating a new bean, we will update any values in the given bean.
+     *
+     * If somehow the extraction fails with something else than an empty array, we will throw an exception here because
+     * we don't want to create a recursive loop saving a failed detection algorithm in the full description of a task
+     * bean.
+     *
+     * @param array $issue
+     * @param \RedBeanPHP\OODBBean|null $taskBean
+     * @throws Exception When the information can't be extracted from the issue, or if no period is found.
+     * @return \RedBeanPHP\OODBBean
+     */
+    public function getTaskBeanFromIssue($issue, $taskBean = null)
+    {
+        if (!$taskBean) {
+            $taskBean = R::dispense('task');
+        }
+
+        // Check if the issue has the simplified comment format, easier to create a task from there.
+        $extracted = $this->getTaskValuesArrayFromIssue($issue);
+        if (is_array($extracted) && !empty($extracted)) {
+            $taskBean->description = $extracted['description'];
+            $taskBean->notes = $extracted['notes'];
+            $taskBean->client = $extracted['client'];
+            $taskBean->contact = $extracted['contact'];
+            $taskBean->project = $extracted['project'];
+            $taskBean->budget = $extracted['budget'];
+            $taskBean->due = $extracted['due'];
+        } elseif (empty($extracted)) {
+            // No values extracted, so we fill it ourselves.
+            $taskBean->description = $issue['body'];
+
+            // Lets try to guess the contact by the creator of the ticket, otherwise leave empty.
+            if (isset($issue['user'])) {
+                $contact = $this->getTaskAssigneesFromIssue(array('assignee' => $issue['user']), true);
+                if ($contact) {
+                    $taskBean->contact = $contact;
+                } else {
+                    $taskBean->contact = '';
+                }
+            }
+        } else {
+            // We can't build a new taskbean from this thing, it seems to have failed the regex, we should not try to
+            // sync it.
+            SyncApp::log(SyncApp::LOG_ERROR, "Can't extract any values from the issue ({$issue['number']}). No task bean created.");
+            throw new Exception("Can't extract any values from the issue ({$issue['number']}). No task bean created.");
+        }
+        $taskBean->name = $issue['title'];
+        $taskBean->type = $this->getTaskTypeFromIssue($issue);
+        $taskBean->prio = SyncApp::$config['defaultTaskPriority'];
+
+        // Leave progress alone unless unset.
+        if (!$taskBean->progress) {
+            $taskBean->progress = 0;
+        }
+
+        // Try to set the period, if we can't find the next period then we set it to the last one available, if there is
+        // no period available, we fail this, and return false.
+        $period = $this->getNextPeriod();
+        if (empty($period)) {
+            SyncApp::log(SyncApp::LOG_WARNING, 'It seems there is no next period, saving it to the latest open one if found.');
+
+            $period = $this->getLatestAvailablePeriod();
+            if (empty($period)) {
+                SyncApp::log(SyncApp::LOG_ERROR, "Can't save issue to any period, this issue ({$issue['number']}) will not be synced.");
+                throw new Exception("Can't save issue to any period, this issue ({$issue['number']}) will not be synced.");
+            }
+        }
+        $taskBean->period_id = $period->id;
+
+        //label to type
+        $taskBean->type = $this->getTaskTypeFromIssue($issue);
+
+        //assignees / work, get the current work first if it is set, then add our assignee if it is not in the current
+        //work array.
+        $work = array();
+        $currentlyAssigned = array();
+        if ($taskBean->work) {
+            foreach ($taskBean->work as $hours) {
+                if ($hours->hours > 0) {
+                    $work[] = $hours;
+                }
+                $currentlyAssigned[] = $work->user_id;
+            }
+        }
+        $assignee = $this->getTaskAssigneesFromIssue($issue, true);
+        if ($assignee) {
+            $assigneesWithUserIds = $this->getUserIds(array($assignee));
+
+            if (!in_array($assigneesWithUserIds[$assignee], $currentlyAssigned)) {
+                $work[] = R::dispense('work')->import(array(
+                        'hours' => SyncApp::$config['defaultTaskHours'],
+                        'user_id' => $assigneesWithUserIds[$assignee]
+                    )
+                );
+            }
+        }
+        $taskBean->xownWorkList = $work;
+
+        //created at / updated at
+        $taskBean->start = DateTime::createFromFormat(DateTime::ISO8601, $issue['created_at'])->format('Y-m-d');
+        $taskBean->end = DateTime::createFromFormat(DateTime::ISO8601, $issue['updated_at'])->format('Y-m-d');
+
+        return $taskBean;
     }
 
     /**
@@ -479,13 +667,86 @@ COMMENT;
      */
     public function getTaskTypeFromIssue($issue)
     {
-        $labelToType = array_flip($this->config['labelTypeMap']);
+        $labelToType = array_flip(SyncApp::$config['labelTypeMap']);
         foreach ($issue['labels'] as $label) {
+            if (isset($label['name'])) {
+                $label = $label['name'];
+            }
             if (isset($labelToType[$label])) {
                 return $labelToType[$label];
             }
         }
         return false;
+    }
+
+    /**
+     * This will return a single name, or a list of names, that are in the nameMap in the config mapped to github
+     * as assignees. It will only return names, you will still need to find the proper id if you want to create work
+     * items out of it.
+     *
+     * @param array $issue
+     * @param bool $matchOne Set to true to only return a single name.
+     * @return array|string|bool array when $matchOne is false, a string otherwise, and false if no assignees match.
+     */
+    public function getTaskAssigneesFromIssue($issue, $matchOne = false)
+    {
+        $reversedUserMap = array_flip(SyncApp::$config['nameMap']);
+        if ($matchOne) {
+            $assignee = $issue['assignee'];
+            if (isset($assignee['login'])) {
+                $assignee = $assignee['login'];
+            }
+            if (isset($reversedUserMap[$assignee])) {
+                return $reversedUserMap[$assignee];
+            }
+        } else {
+            $work = array();
+            foreach ($issue['assignees'] as $assignee) {
+                if (isset($assignee['login'])) {
+                    $assignee = $assignee['login'];
+                }
+                if (isset($reversedUserMap[$assignee])) {
+                    $work[] = $reversedUserMap[$assignee];
+                }
+            }
+            return $work;
+        }
+        return false;
+    }
+
+    /**
+     * @TODO
+     * @param $issue
+     * @return bool
+     */
+    public function getTaskValuesArrayFromIssue($issue)
+    {
+        $issue = $this->stripTasksoupUrlFromIssue($issue);
+        $regexSimpleComment = '~\*\*Description:\*\*\n(?<description>.*)\n\n\*\*Notes:\*\*\n(?<notes>.*)\n\n\*\*Client:\*\*\s+_(?<client>.*)_\n\*\*Contact:\*\*\s+_(?<contact>.*)_\n\*\*Project:\*\*\s+_(?<project>.*)_\n\*\*Budget:\*\*\s+_(?<budget>.*)_\n\*\*Due:\*\*\s+_(?<due>.*)_\n*~is';
+        if (preg_match($regexSimpleComment, $issue['body'], $matches)) {
+            return $matches;
+        } elseif (stripos($issue['body'], '**Description**') !== false) {
+            // It seems there is some sort of formatting, but it doesn't match anything we know.
+            return false;
+        }
+        return array();
+    }
+
+    /**
+     * Returns an array with the username as key, and the id as value. If some username is not found, it won't be in the
+     * returned array.
+     *
+     * @param array $nickArray filled with usernames.
+     * @return array
+     */
+    public function getUserIds($nickArray)
+    {
+        $return = array();
+        $userBeans = R::find('user', 'nick IN  (' . R::genSlots($nickArray) . ')', $nickArray);
+        foreach ($userBeans as $user) {
+            $return[$user->nick] = $user->id;
+        }
+        return $return;
     }
 
     /**
@@ -501,10 +762,9 @@ COMMENT;
      */
     public function getIssueFromTask($taskBean)
     {
-        $tasksoupUrl = SyncApp::$config['tasksoupUrl'];
         return array(
             'title' => $taskBean->name,
-            'body' => $this->getSimplifiedComment($taskBean) . "\n\n[Task on tasksoup]({$tasksoupUrl}?c=edittask&id={$taskBean->id})",
+            'body' => $this->getSimplifiedComment($taskBean) . $this->getTasksoupUrlMarkdown($taskBean->id),
             'labels' => $this->getIssueLabelsFromTask($taskBean),
             'assignee' => $this->getIssueAssigneesFromTask($taskBean, true),
         );
@@ -562,6 +822,37 @@ COMMENT;
             }
         }
         return $matchOne ? $assignee : $assignees;
+    }
+
+    /**
+     * Returns the url in markdown format that can be added at the end of a simplified comment, that links back to the
+     * tasksoup task.
+     *
+     * @param int|bool $taskId Should be set to a taskId, or when set to false will return a regex string with which you
+     * can find the url, and the id.
+     * @return string
+     */
+    public function getTasksoupUrlMarkdown($taskId)
+    {
+        if ($taskId !== false) {
+            $tasksoupUrl = SyncApp::$config['tasksoupUrl'];
+            $return = "\n\n[Task on tasksoup]({$tasksoupUrl}?c=edittask&id={$taskId})";
+        } else {
+            $return = '~\n\n\[Task on tasksoup]\((.*)\?c=edittask&id=(\d+)\)~';
+        }
+        return $return;
+    }
+
+    /**
+     * This strips the url from the body of an issue, so that we can nicely hash the issue body back into the same hash
+     * we get when we has the simplified comment made out of a tasksoup task.
+     * @param array $issue
+     * @return array Return the issue with the url stripped from the body.
+     */
+    public function stripTasksoupUrlFromIssue($issue)
+    {
+        $issue['body'] = preg_replace($this->getTasksoupUrlMarkdown(false), '', $issue['body']);
+        return $issue;
     }
 
     /**

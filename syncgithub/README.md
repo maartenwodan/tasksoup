@@ -6,6 +6,13 @@ Features
 
  - Sync assigned to back and forth, only with username mapping.
 
+Limitations
+===========
+
+Only syncs properly now between ONE repository, and only if you have ONE team in tasksoup.
+Multiple teams cause issues with selecting the proper period when syncing issues from GitHub
+to tasksoup.
+
 Install
 =======
 Setup your database name in the following files:
@@ -36,7 +43,9 @@ empty database it might just create all tickets new again.
 Future
 ======
 
- - Sync priority with github prio's.
+ - Full team support, now only works correctly for one team.
+ - Full assignee support, waiting for github api to come out of beta.
+ - Sync priority with github prio's (or labels).
  - Sync usernames, contact can be @username if a map exists. Requires
  username mapping.
  - Sync Progress with whatever (zenhub?).
@@ -141,7 +150,8 @@ Updating from github:
  
 Closing from github:
 
- - Get all open tickets in tasksoup from github.
+ - Get all issues from github from last modified sync. 
+ - Compare issues with open syncs.
  - Check if they are closed.
  - Set percentage to 100% in tasksoup.
  - Set done in tasksoup.

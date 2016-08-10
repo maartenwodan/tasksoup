@@ -114,4 +114,26 @@ return array(
      * you add custom labels in Github.
      */
     'removeLabels' => false,
+
+    /*
+     * Only needs to be set if you have setup github to be synced back to tasksoup as well.
+     *
+     * When there is lots and lots of issues to be synced, it might have a race condition where between the start of the
+     * script and the end, an issue will be changed. This issue won't be taken into account when syncing because the
+     * last modified already took place, because of this you can configure a 'modifiedDiscrepancy' value in your config.
+     *
+     * This can be set in any value that datetime.modify accepts. http://php.net/manual/en/datetime.modify.php
+     */
+    'modifiedDiscrepancy' => '-5 minutes',
+
+    /*
+     * Default priority set to new tasks coming from Github. This is the actual id, and not the description of the
+     * priority array.
+     */
+    'defaultTaskPriority' => 2,
+
+    /*
+     * Default hours to be set if the task is not assigned yet.
+     */
+    'defaultTaskHours' => 1,
 );
