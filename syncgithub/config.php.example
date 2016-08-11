@@ -98,6 +98,8 @@ return array(
      * 2 => 'Improvement',
      * 3 => 'Feature',
      * 4 => 'Task'
+     *
+     * You might want to change these to non capitalized labels, which is the default in github.
      */
     'labelType' => true,
     'labelTypeMap' => array(

@@ -43,13 +43,17 @@ empty database it might just create all tickets new again.
 Future
 ======
 
+*Features*
  - Full team support, now only works correctly for one team.
  - Full assignee support, waiting for github api to come out of beta.
  - Sync priority with github prio's (or labels).
- - Sync usernames, contact can be @username if a map exists. Requires
- username mapping.
+ - Sync usernames, contact can be @username if a map exists. Requires username mapping.
  - Sync Progress with whatever (zenhub?).
- - Connect with GitHooks instead of cron?
+ - Connect with GitHooks instead of cron.
+
+*Code*
+ - Proper use of relations with RedBean.
+ - Proper use of models.
 
 Inner workings
 ==============

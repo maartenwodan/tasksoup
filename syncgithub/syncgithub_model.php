@@ -676,6 +676,7 @@ COMMENT;
                 return $labelToType[$label];
             }
         }
+        SyncApp::log(SyncApp::LOG_WARNING, "No known task type for issue ({$issue['number']}), update labelTypeMap, or assign proper label in github.");
         return false;
     }
 
