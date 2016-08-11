@@ -716,9 +716,15 @@ COMMENT;
     }
 
     /**
-     * @TODO
-     * @param $issue
-     * @return bool
+     * Tries to match the simple comment formatting to values that can be used in a task. Returns an array with task
+     * values. If it detects that it is a formatted issue, but somehow can't extract all values, it is deemed corrupt
+     * and this function will return false and log a warning.
+     *
+     * If no formatting is detected it will return an empty string.
+     *
+     * @see getSimplifiedComment()
+     * @param array $issue
+     * @return array|bool
      */
     public function getTaskValuesArrayFromIssue($issue)
     {
@@ -728,6 +734,7 @@ COMMENT;
             return $matches;
         } elseif (stripos($issue['body'], '**Description**') !== false) {
             // It seems there is some sort of formatting, but it doesn't match anything we know.
+            SyncApp::log(SyncApp::LOG_WARNING, "Issue ({$issue['number']}) seems to have Tasksoup formatting, but we can't extract all values.");
             return false;
         }
         return array();
