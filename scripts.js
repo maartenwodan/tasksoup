@@ -5,7 +5,7 @@ window.onload = function(){
 		for(var j=1; j<trs.length; j++) trs[j].style.opacity=1; //reset all TRs	
 		for(var j=1; j<trs.length; j++) {
 			if (e.target.getAttribute('class')==='photo') { //Filter photos
-				if (!trs[j].querySelectorAll('td img[alt="'+e.target.getAttribute('alt')+'"]').length) {
+				if (trs[j].getAttribute('data-nicks').indexOf('|'+e.target.getAttribute('alt')+'|') == -1) {
 					trs[j].style.opacity=0.2;
 				}
 
