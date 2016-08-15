@@ -364,7 +364,7 @@ switch( $cmd ) {
 			$taskRow = $taskList->getTask();
 			$taskRow->setId($task->id);
 			$weight = $ppl = 0;
-			$nicks = [];
+			$nicks = array();
 			foreach( $task->xownWorkList as $work ) {
 				$weight += $work->hours;
 				if (!$work->hours) continue;
