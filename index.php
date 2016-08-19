@@ -359,11 +359,12 @@ switch( $cmd ) {
 					->setLinkToTeamEditor("?c=editteam&id={$currentTeam->id}"));
 			break;
 		}
-		
+
 		foreach($tasks as $task) {
 			$taskRow = $taskList->getTask();
 			$taskRow->setId($task->id);
 			$weight = $ppl = 0;
+			$nicks = array();
 			foreach( $task->xownWorkList as $work ) {
 				$weight += $work->hours;
 				if (!$work->hours) continue;
@@ -372,7 +373,9 @@ switch( $cmd ) {
 					->setTooltip($work->user->nick)
 					->setDescription($work->user->nick);
 				if (++$ppl < 4) $taskRow->add($photo);
+				$nicks[] = $work->user->nick;
 			}
+			$taskRow->setNicks('|' . implode('|', $nicks) . '|');
 			if (!$task->done) $workload += $weight;
 			$total += $weight;
 			$warning = (!$task->done && $task->due != '' && strtotime($task->due)<time()-(3600*10));
