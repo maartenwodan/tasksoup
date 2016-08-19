@@ -64,166 +64,7 @@ class SyncApp
         $model = new SyncGitHub();
 
         if ($model->checkGitHubApiRateLimit()) {
-
-            // From github to tasksoup
-            $issues = $model->getAllIssues(true); // '2016-07-05 18:00:00'
-            self::log(self::LOG_INFO, "Going to try and check if " . count($issues) . " issues need to be synced.");
-            foreach ($issues as $issue) {
-                $syncBean = $model->getSyncBeanFromIssue($issue);
-                // Check if the syncbean exists, if it does, we should update the issue, if not, we should create a task.
-                if ($syncBean) {
-                    // Update the task if the hash differentiates, if so update the task.
-                    $checksum = $model->getIssueHash($issue);
-
-                    // Check if state has changed, with ones and zeroes for easy comparison to our table.
-                    $issueIsDone = $issue['state'] == 'closed' ? 1 : 0;
-
-                    // Updating task with new info here.
-                    if (!$issueIsDone && $syncBean->checksum != $checksum && $syncBean->task && $syncBean->task->id) {
-                        self::log(self::LOG_INFO, "Found modified issue ({$syncBean->issue_id}), so we can update task ({$syncBean->task_id}).");
-                        R::begin();
-                        try {
-                            $taskBean = $model->getTaskBeanFromIssue($issue, $syncBean->task);
-                            $model->saveTask($taskBean);
-                            $syncBean->checksum = $model->getTaskHash($taskBean);
-                            $model->saveSyncBean($syncBean);
-                            R::commit();
-                        } catch (Exception $e) {
-                            self::log(self::LOG_ERROR, 'Failed to update task, rolling back changes.');
-                            self::log(self::LOG_DEBUG, $e->getMessage());
-                            R::rollback();
-                        }
-                    }
-
-                    // Closing / Reopening here.
-                    if ($issueIsDone != $syncBean->done) {
-                        self::log(self::LOG_INFO, "Found state change for issue ({$syncBean->issue_id}) and task ({$syncBean->task_id}), state is now {$issue['state']}.");
-                        if ($issueIsDone) {
-                            // Just closing the task and the sync and it's done!
-                            $syncBean->done = 1;
-                            $model->saveSyncBean($syncBean);
-
-                            // Only update task if it is attached and not deleted yet.
-                            if ($syncBean->task_id !== 0) {
-                                $task = $syncBean->task;
-                                $task->done = 1;
-                                $task->progress = 100;
-                                $task->end = date('Y-m-d');
-                                $model->saveTask($task);
-                            }
-                        } else {
-                            // Issue got reopened, what's going on! There are a few possibilities:
-                            // 1. Issue reopened, task is closed, period is current. => Just open task.
-                            // 2. Issue reopened, task was deleted. This means we have to recreate the task again.
-                            // 3. Issue reopened, task is closed, period has past => Copy task to nextPeriod
-                            // 4. Issue reopened, task is closed, period has yet to begin => Open again.
-                            // 5. Issue reopened, task is closed, has no period! Put it in next period, open again.
-                            self::log(self::LOG_INFO, "Issue reopened ({$issue['number']}), checking what state we are in...");
-
-                            // actual saving happens at the end of this else statement, we can set this to false if an
-                            // error occurred so that we do not save anything.
-                            $succesfulReopening = true;
-
-                            // Redbean automatically creates a task when the old one got deleted, with a proper id. Id
-                            // should always be filled and 0 so check on that.
-                            if ($syncBean->task && $syncBean->task->id) {
-                                $taskBean = $syncBean->task;
-                                $period = $taskBean->period;
-                                if ($period) {
-                                    $start = DateTime::createFromFormat('Y-m-d', $period->start);
-                                    $end = DateTime::createFromFormat('Y-m-d', $period->end);
-                                    $now = new Datetime('now');
-
-                                    if (($end > $now && $start < $now) || $start > $now) {
-                                        // Situation 1. Current period
-                                        // Situation 4. Period has yet to start.
-                                        self::log(self::LOG_INFO, "Task ({$taskBean->id}) is in valid period, reopening task.");
-                                        $taskBean->progress = 0;
-                                        $taskBean->done = 0;
-                                    } elseif ($end < $now) {
-                                        // Situation 3. Period has passed..
-                                        self::log(self::LOG_INFO, "Task ({$taskBean->id}) is in an old period, copying task to next period.");
-                                        $period = $model->getNextPeriod();
-                                        if ($period) {
-                                            $taskBean->id = 0;
-                                            $taskBean->progress = 0;
-                                            $taskBean->done = 0;
-                                            $taskBean->period = $period;
-                                            $syncBean->task = $taskBean;
-                                        } else {
-                                            self::log(self::LOG_ERROR, "Can't find a period to copy newly reopened issue too, didn't do anything.");
-                                            $succesfulReopening = false;
-                                        }
-                                    } else {
-                                        // It shouldn't get here, something fishy happened.
-                                        self::log(self::LOG_ERROR, "Something fishy about period with id ({$period->id}), didn't do anything.");
-                                        $succesfulReopening = false;
-                                    }
-                                } else {
-                                    // Situation 5. Invalid period.
-                                    self::log(self::LOG_INFO, "Task ({$taskBean->id}) is in non existing period, moving task to next period.");
-                                    $period = $model->getNextPeriod();
-                                    if ($period) {
-                                        $taskBean->period = $period;
-                                        $taskBean->progress = 0;
-                                        $taskBean->done = 0;
-                                    } else {
-                                        self::log(self::LOG_ERROR, "Can't find a period to copy newly reopened issue too, create a new period, didn't do anything.");
-                                        $succesfulReopening = false;
-                                    }
-                                }
-                            } else {
-                                // Situation 2. Deleted task.
-                                try {
-                                    $taskBean = $model->getTaskBeanFromIssue($issue);
-                                    $syncBean->task = $taskBean;
-                                    self::log(self::LOG_INFO, "Task for issue ({$issue['number']}) got deleted, creating new task for reopened issue : $taskBean->name");
-                                } catch (Exception $e) {
-                                    self::log(self::LOG_ERROR, 'Failed to create new task, will not do anything.');
-                                    self::log(self::LOG_DEBUG, $e->getMessage());
-                                    $succesfulReopening = false;
-                                }
-                            }
-
-                            // Actual saving happens here.
-                            if ($succesfulReopening) {
-                                R::begin();
-                                try {
-                                    $model->saveTask($taskBean);
-                                    $syncBean->done = 0;
-                                    $model->saveSyncBean($syncBean);
-                                    R::commit();
-                                } catch (Exception $e) {
-                                    self::log(self::LOG_ERROR, 'Failed to reopen task.');
-                                    self::log(self::LOG_DEBUG, $e->getMessage());
-                                    R::rollback();
-                                }
-                            }
-                        }
-                    }
-                } elseif ($issue['state'] == 'open') {
-                    // No syncBean, so we are creating a new task in tasksoup, and updating the body of the issue.
-                    R::begin();
-                    try {
-                        $taskBean = $model->getTaskBeanFromIssue($issue);
-                        self::log(self::LOG_INFO, "Creating task for issue ({$issue['number']}): $taskBean->name");
-                        $model->saveTask($taskBean);
-                        $model->saveSyncBean($model->createSyncBean($taskBean, $issue));
-
-                        $taskIssue = $model->getIssueFromTask($taskBean);
-                        $taskIssue['number'] = $issue['number'];
-                        unset($taskIssue['assignee']);
-                        unset($taskIssue['assignees']);
-                        $model->updateIssue($taskIssue);
-                        R::commit();
-                    } catch (Exception $e) {
-                        self::log(self::LOG_ERROR, 'Failed to create task, rolling back changes.');
-                        self::log(self::LOG_DEBUG, $e->getMessage());
-                        R::rollback();
-                    }
-                }
-            }
-
+            // From tasksoup to github
             // Create new tasks
             $openTasks = $model->getAllNewOpenTasks();
             foreach ($openTasks as $task) {
@@ -346,6 +187,166 @@ class SyncApp
                 }
             }
         };
+
+        // From github to tasksoup
+        $issues = $model->getAllIssues(true); // '2016-07-05 18:00:00'
+        self::log(self::LOG_INFO, "Going to try and check if " . count($issues) . " issues need to be synced.");
+        foreach ($issues as $issue) {
+            $syncBean = $model->getSyncBeanFromIssue($issue);
+            // Check if the syncbean exists, if it does, we should update the issue, if not, we should create a task.
+            if ($syncBean) {
+                // Update the task if the hash differentiates, if so update the task.
+                $checksum = $model->getIssueHash($issue);
+
+                // Check if state has changed, with ones and zeroes for easy comparison to our table.
+                $issueIsDone = $issue['state'] == 'closed' ? 1 : 0;
+
+                // Updating task with new info here.
+                if (!$issueIsDone && $syncBean->checksum != $checksum && $syncBean->task && $syncBean->task->id) {
+                    self::log(self::LOG_INFO, "Found modified issue ({$syncBean->issue_id}), so we can update task ({$syncBean->task_id}).");
+                    R::begin();
+                    try {
+                        $taskBean = $model->getTaskBeanFromIssue($issue, $syncBean->task);
+                        $model->saveTask($taskBean);
+                        $syncBean->checksum = $model->getTaskHash($taskBean);
+                        $model->saveSyncBean($syncBean);
+                        R::commit();
+                    } catch (Exception $e) {
+                        self::log(self::LOG_ERROR, 'Failed to update task, rolling back changes.');
+                        self::log(self::LOG_DEBUG, $e->getMessage());
+                        R::rollback();
+                    }
+                }
+
+                // Closing / Reopening here.
+                if ($issueIsDone != $syncBean->done) {
+                    self::log(self::LOG_INFO, "Found state change for issue ({$syncBean->issue_id}) and task ({$syncBean->task_id}), state is now {$issue['state']}.");
+                    if ($issueIsDone) {
+                        // Just closing the task and the sync and it's done!
+                        $syncBean->done = 1;
+                        $model->saveSyncBean($syncBean);
+
+                        // Only update task if it is attached and not deleted yet.
+                        if ($syncBean->task_id !== 0) {
+                            $task = $syncBean->task;
+                            $task->done = 1;
+                            $task->progress = 100;
+                            $task->end = date('Y-m-d');
+                            $model->saveTask($task);
+                        }
+                    } else {
+                        // Issue got reopened, what's going on! There are a few possibilities:
+                        // 1. Issue reopened, task is closed, period is current. => Just open task.
+                        // 2. Issue reopened, task was deleted. This means we have to recreate the task again.
+                        // 3. Issue reopened, task is closed, period has past => Copy task to nextPeriod
+                        // 4. Issue reopened, task is closed, period has yet to begin => Open again.
+                        // 5. Issue reopened, task is closed, has no period! Put it in next period, open again.
+                        self::log(self::LOG_INFO, "Issue reopened ({$issue['number']}), checking what state we are in...");
+
+                        // actual saving happens at the end of this else statement, we can set this to false if an
+                        // error occurred so that we do not save anything.
+                        $succesfulReopening = true;
+
+                        // Redbean automatically creates a task when the old one got deleted, with a proper id. Id
+                        // should always be filled and 0 so check on that.
+                        if ($syncBean->task && $syncBean->task->id) {
+                            $taskBean = $syncBean->task;
+                            $period = $taskBean->period;
+                            if ($period) {
+                                $start = DateTime::createFromFormat('Y-m-d', $period->start);
+                                $end = DateTime::createFromFormat('Y-m-d', $period->end);
+                                $now = new Datetime('now');
+
+                                if (($end > $now && $start < $now) || $start > $now) {
+                                    // Situation 1. Current period
+                                    // Situation 4. Period has yet to start.
+                                    self::log(self::LOG_INFO, "Task ({$taskBean->id}) is in valid period, reopening task.");
+                                    $taskBean->progress = 0;
+                                    $taskBean->done = 0;
+                                } elseif ($end < $now) {
+                                    // Situation 3. Period has passed..
+                                    self::log(self::LOG_INFO, "Task ({$taskBean->id}) is in an old period, copying task to next period.");
+                                    $period = $model->getNextPeriod();
+                                    if ($period) {
+                                        $taskBean->id = 0;
+                                        $taskBean->progress = 0;
+                                        $taskBean->done = 0;
+                                        $taskBean->period = $period;
+                                        $syncBean->task = $taskBean;
+                                    } else {
+                                        self::log(self::LOG_ERROR, "Can't find a period to copy newly reopened issue too, didn't do anything.");
+                                        $succesfulReopening = false;
+                                    }
+                                } else {
+                                    // It shouldn't get here, something fishy happened.
+                                    self::log(self::LOG_ERROR, "Something fishy about period with id ({$period->id}), didn't do anything.");
+                                    $succesfulReopening = false;
+                                }
+                            } else {
+                                // Situation 5. Invalid period.
+                                self::log(self::LOG_INFO, "Task ({$taskBean->id}) is in non existing period, moving task to next period.");
+                                $period = $model->getNextPeriod();
+                                if ($period) {
+                                    $taskBean->period = $period;
+                                    $taskBean->progress = 0;
+                                    $taskBean->done = 0;
+                                } else {
+                                    self::log(self::LOG_ERROR, "Can't find a period to copy newly reopened issue too, create a new period, didn't do anything.");
+                                    $succesfulReopening = false;
+                                }
+                            }
+                        } else {
+                            // Situation 2. Deleted task.
+                            try {
+                                $taskBean = $model->getTaskBeanFromIssue($issue);
+                                $syncBean->task = $taskBean;
+                                self::log(self::LOG_INFO, "Task for issue ({$issue['number']}) got deleted, creating new task for reopened issue : $taskBean->name");
+                            } catch (Exception $e) {
+                                self::log(self::LOG_ERROR, 'Failed to create new task, will not do anything.');
+                                self::log(self::LOG_DEBUG, $e->getMessage());
+                                $succesfulReopening = false;
+                            }
+                        }
+
+                        // Actual saving happens here.
+                        if ($succesfulReopening) {
+                            R::begin();
+                            try {
+                                $model->saveTask($taskBean);
+                                $syncBean->done = 0;
+                                $model->saveSyncBean($syncBean);
+                                R::commit();
+                            } catch (Exception $e) {
+                                self::log(self::LOG_ERROR, 'Failed to reopen task.');
+                                self::log(self::LOG_DEBUG, $e->getMessage());
+                                R::rollback();
+                            }
+                        }
+                    }
+                }
+            } elseif ($issue['state'] == 'open') {
+                // No syncBean, so we are creating a new task in tasksoup, and updating the body of the issue.
+                R::begin();
+                try {
+                    $taskBean = $model->getTaskBeanFromIssue($issue);
+                    self::log(self::LOG_INFO, "Creating task for issue ({$issue['number']}): $taskBean->name");
+                    $model->saveTask($taskBean);
+                    $model->saveSyncBean($model->createSyncBean($taskBean, $issue));
+
+                    $taskIssue = $model->getIssueFromTask($taskBean);
+                    $taskIssue['number'] = $issue['number'];
+                    unset($taskIssue['assignee']);
+                    unset($taskIssue['assignees']);
+                    $model->updateIssue($taskIssue);
+                    R::commit();
+                } catch (Exception $e) {
+                    self::log(self::LOG_ERROR, 'Failed to create task, rolling back changes.');
+                    self::log(self::LOG_DEBUG, $e->getMessage());
+                    R::rollback();
+                }
+            }
+        }
+
         self::log(self::LOG_INFO, 'Sync ended.');
     }
 }
