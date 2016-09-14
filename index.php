@@ -399,6 +399,19 @@ switch( $cmd ) {
 				->setTooltip( $task->description )
 				->setClient( cut( $task->client, 20 ) )->setContact( cut( $task->contact, 80 ) )
 				->setName( cut( $task->name, 80 ) );
+
+            $syncGitHub = R::findOne( 'syncgithub', ' task_id = ? ', array( $task->id ) );
+            if ($syncGitHub->id) {
+                if (!file_exists('syncgithub' . DIRECTORY_SEPARATOR . 'config.php')) {
+                    throw new Exception ('SyncGitHub config.php does not exist, even though sync table does exist. Please create a config or uninstall SyncGitHub.');
+                }
+                $syncGitHubConfig = include_once('syncgithub' . DIRECTORY_SEPARATOR . 'config.php');
+                $syncGitHub = $taskRow->getSyncGitHubRow()
+                    ->setGitHubLink('https://github.com/' . $syncGitHubConfig['gitLocation'] . '/' . $syncGitHubConfig['gitRepo'] . '/issues/' . $syncGitHub->issue_id)
+                    ->setGitHubIssueId($syncGitHub->issue_id);
+                $taskRow->add($syncGitHub);
+            }
+
 			$taskList->add($taskRow);
 		}
 		
