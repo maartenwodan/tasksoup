@@ -405,7 +405,7 @@ switch( $cmd ) {
                 if (!file_exists('syncgithub' . DIRECTORY_SEPARATOR . 'config.php')) {
                     throw new Exception ('SyncGitHub config.php does not exist, even though sync table does exist. Please create a config or uninstall SyncGitHub.');
                 }
-                $syncGitHubConfig = include_once('syncgithub' . DIRECTORY_SEPARATOR . 'config.php');
+                $syncGitHubConfig = include('syncgithub' . DIRECTORY_SEPARATOR . 'config.php');
                 $syncGitHub = $taskRow->getSyncGitHubRow()
                     ->setGitHubLink('https://github.com/' . $syncGitHubConfig['gitLocation'] . '/' . $syncGitHubConfig['gitRepo'] . '/issues/' . $syncGitHub->issue_id)
                     ->setGitHubIssueId($syncGitHub->issue_id);
