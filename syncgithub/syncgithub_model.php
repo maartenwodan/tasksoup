@@ -568,6 +568,23 @@ COMMENT;
     {
         if (!$taskBean) {
             $taskBean = R::dispense('task');
+
+            //created at
+            $taskBean->start = DateTime::createFromFormat(DateTime::ISO8601, $issue['created_at'])->format('Y-m-d');
+
+            // Try to set the period, if we can't find the next period then we set it to the last one available, if there is
+            // no period available, we fail this, and return false.
+            $period = $this->getNextPeriod();
+            if (empty($period)) {
+                SyncApp::log(SyncApp::LOG_WARNING, 'It seems there is no next period, saving it to the latest open one if found.');
+
+                $period = $this->getLatestAvailablePeriod();
+                if (empty($period)) {
+                    SyncApp::log(SyncApp::LOG_ERROR, "Can't save issue to any period, this issue ({$issue['number']}) will not be synced.");
+                    throw new Exception("Can't save issue to any period, this issue ({$issue['number']}) will not be synced.");
+                }
+            }
+            $taskBean->period_id = $period->id;
         }
 
         // Check if the issue has the simplified comment format, easier to create a task from there.
@@ -580,7 +597,9 @@ COMMENT;
             $taskBean->project = $extracted['project'];
             $taskBean->budget = $extracted['budget'];
             $taskBean->due = $extracted['due'];
-        } elseif (empty($extracted)) {
+        } elseif (is_array($extracted) && empty($extracted)) {
+            SyncApp::log(SyncApp::LOG_WARNING, "Can't extract any values from the issue ({$issue['number']}).");
+
             // No values extracted, so we fill it ourselves.
             $taskBean->description = $issue['body'];
 
@@ -607,20 +626,6 @@ COMMENT;
         if (!$taskBean->progress) {
             $taskBean->progress = 0;
         }
-
-        // Try to set the period, if we can't find the next period then we set it to the last one available, if there is
-        // no period available, we fail this, and return false.
-        $period = $this->getNextPeriod();
-        if (empty($period)) {
-            SyncApp::log(SyncApp::LOG_WARNING, 'It seems there is no next period, saving it to the latest open one if found.');
-
-            $period = $this->getLatestAvailablePeriod();
-            if (empty($period)) {
-                SyncApp::log(SyncApp::LOG_ERROR, "Can't save issue to any period, this issue ({$issue['number']}) will not be synced.");
-                throw new Exception("Can't save issue to any period, this issue ({$issue['number']}) will not be synced.");
-            }
-        }
-        $taskBean->period_id = $period->id;
 
         //label to type
         $taskBean->type = $this->getTaskTypeFromIssue($issue);
@@ -651,8 +656,7 @@ COMMENT;
         }
         $taskBean->xownWorkList = $work;
 
-        //created at / updated at
-        $taskBean->start = DateTime::createFromFormat(DateTime::ISO8601, $issue['created_at'])->format('Y-m-d');
+        // Updated at
         $taskBean->end = DateTime::createFromFormat(DateTime::ISO8601, $issue['updated_at'])->format('Y-m-d');
 
         return $taskBean;
@@ -735,6 +739,7 @@ COMMENT;
         } elseif (stripos($issue['body'], '**Description**') !== false) {
             // It seems there is some sort of formatting, but it doesn't match anything we know.
             SyncApp::log(SyncApp::LOG_WARNING, "Issue ({$issue['number']}) seems to have Tasksoup formatting, but we can't extract all values.");
+            SyncApp::log(SyncApp::LOG_DEBUG, "Full body of issue ({$issue['number']}) that failed to extract:\n {$issue['body']}\n");
             return false;
         }
         return array();
