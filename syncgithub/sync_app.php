@@ -64,8 +64,8 @@ class SyncApp
         $model = new SyncGitHub();
 
         if ($model->checkGitHubApiRateLimit()) {
-            $this->fromTasksoupToGitHub();
-            $this->fromGitHubToTasksoup();
+            $this->fromTasksoupToGitHub($model);
+            $this->fromGitHubToTasksoup($model);
         }
 
         self::log(self::LOG_INFO, 'Sync ended.');
